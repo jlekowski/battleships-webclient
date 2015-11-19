@@ -67,15 +67,6 @@ div.board div div {
     user-select: none;
 }
 
-/*div.board:first-of-type div div {
-    border-bottom: 1px solid black;
-    border-right: 1px solid black;
-}
-
-div.board:nth-of-type(1) div div {
-    border-bottom: 1px solid #ccc;
-    border-right: 1px solid #ccc;
-}*/
 
 div.board div:first-child div {
     border-bottom-color: transparent;
@@ -103,22 +94,6 @@ div.board div.hit {
 }
 
 
-/* CSS for log div */
-div.log {
-    display: none;
-    font-size: 11px;
-    font-family: monospace;
-    border: 1px solid;
-    float: left;
-    padding-left: 10px;
-    padding-right: 5px;
-    height: 363px;
-    width: 250px;
-    overflow: auto;
-    word-wrap: break-word;
-}
-
-
 /* Update button for debug mode */
 #update {
     display: none;
@@ -132,6 +107,7 @@ div.log {
 
 /* link for the opponent to join the game */
 #game_link {
+    display: none;
     float: left;
     clear: both;
     margin: 15px 0 -20px 15px;

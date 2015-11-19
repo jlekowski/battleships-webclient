@@ -3,7 +3,7 @@ var BattleshipsClass = function() {
     // events log management
     var debug = !!localStorage.getItem('debug'),
     // API's base URL
-        baseUrl = 'http://battleships-api.private/v1',
+        baseUrl = 'http://battleships-api.dev.lekowski.pl/v1',
     // battle boards axis Y legend
         axisY = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J'],
     // battle boards axis X legend
@@ -16,6 +16,10 @@ var BattleshipsClass = function() {
         playerStarted = false,
     // whether opponent started the game
         otherStarted = false,
+    // whether player joined the game
+        playerJoined = false,
+    // whether opponent joined the game
+        otherJoined = false,
     // prevents shooting
         shotInProgress = false,
     // player number 1 or 2
@@ -32,8 +36,6 @@ var BattleshipsClass = function() {
         lastIdEvents = 0;
 
     this.run = function() {
-        var gameInfo;
-
         // default settings for AJAX calls
         $.ajaxSetup({
             dataType: 'json',
@@ -95,19 +97,54 @@ var BattleshipsClass = function() {
         // check for updates
         $('#check_update').on('click', {gt: lastIdEvents}, getEvents);
 
-//            gameToken = '00f2ef74057859017ad48d1ff59f7767';
-//            gameId = 63;
+        //gameToken = '00f2ef74057859017ad48d1ff59f7767';
+        //gameId = 63;
+        //return;
 
-        gameInfo = location.hash.replace(/^#/, '').split(';');
-        if (gameInfo.length > 1) {
-            gameToken = gameInfo[0];
-            gameId = parseInt(gameInfo[1]);
-            console.info('Game from hash (token, id)', gameToken, gameId);
-            getGame().done(getEvents);
-        } else {
-            addGame().done(getGame);
-        }
+        $(window).on('hashchange', onHashChange).triggerHandler('hashchange', {first: true});
     };
+
+    function onHashChange(event, data) {
+        var hashInfo = location.hash.replace(/^#/, '').split(';');
+
+        // no need to do it after page load
+        if (!data || !data.first) {
+            $battleground.removeClass();
+            gameStarted = false;
+            gameEnded = false;
+            playerStarted = false;
+            otherStarted = false;
+
+            setTurn(0);
+
+            $('#start').prop('disabled', false);
+            $('#random_shot').hide();
+            $('#random_ships').prop('disabled', false).show();
+        }
+
+        if (hashInfo.length > 1) {
+            gameToken = hashInfo[0];
+            gameId = parseInt(hashInfo[1]);
+            console.info('Game from hash (token: `%s`, id: %d)', gameToken, gameId);
+            getGame().done(function(event) {
+                getEvents(event).done(function() {
+                    if (playerNumber === 1 && !otherJoined) {
+                        $('#game_link').show();
+                    }
+
+                    if (playerNumber === 2 && !playerJoined) {
+                        addEvent('join_game');
+                    }
+                });
+            });
+        } else {
+            addGame($('.player_name:first').text()).done(function() {
+                getGame().done(function() {
+                    $('#game_link').show();
+                });
+            });
+        }
+    }
 
     function battlegroundClickCallback() {
         var $field = $(this);
@@ -145,6 +182,8 @@ var BattleshipsClass = function() {
                 gameStarted = true;
                 $('#start').prop('disabled', true);
                 $('#random_shot, #random_ships').toggle();
+                $('#random_shot').prop('disabled', true).show();
+                $('#random_ships').hide();
                 setTurn(findWaitingPlayer());
                 addEvent('start_game');
             }
@@ -169,13 +208,14 @@ var BattleshipsClass = function() {
     }
 
     /**
+     * @oaram {String} playerName
      * @return {Object} jqXHR
      */
-    function addGame() {
+    function addGame(playerName) {
         return $.ajax({
             url: '/games',
             method: 'POST',
-            data: {playerName: 'Test Player'},
+            data: {playerName: playerName},
             success: function(data, textStatus, jqXHR) {
                 gameToken = jqXHR.getResponseHeader('Game-Token');
                 gameId = parseInt(jqXHR.getResponseHeader('Location').match(/\d+$/)[0]);
@@ -205,12 +245,15 @@ var BattleshipsClass = function() {
                     gameStarted = true;
                     $('#start').prop('disabled', true);
                     $('#random_shot, #random_ships').toggle();
+                    $('#random_shot').show();
+                    $('#random_ships').hide();
                     setTurn(findWaitingPlayer());
                 }
 
                 playerNumber = data.playerNumber;
                 $('.player_name').text(data.playerName);
                 $('.other_name').text(data.otherName);
+                $('#game_link span').text(location.href.replace(/#.*$/, '#' + [data.otherHash, gameId].join(';')));
             }
         });
     }
@@ -246,7 +289,6 @@ var BattleshipsClass = function() {
         for (i = 0; i < events.length; i++) {
             event = events[i];
 
-            console.log('event type `%s` and value `%s`', event.type, event.value);
             switch (event.type) {
                 case 'name_update':
                     if (event.player !== playerNumber) {
@@ -267,7 +309,10 @@ var BattleshipsClass = function() {
                 case 'join_game':
                     if (event.player !== playerNumber) {
                         $('.board_menu:eq(1) span').css({fontWeight: 'bold'});
-//                            $('#game_link').text('');
+                        $('#game_link').hide().find('span').text('');
+                        otherJoined = true;
+                    } else {
+                        playerJoined = true;
                     }
                     break;
 
@@ -307,29 +352,31 @@ var BattleshipsClass = function() {
     }
 
     function nameUpdateTextKeyupCallback(event) {
-        var $input, newName, $nameElement, nameClassSelector;
+        var $input = $(this),
+            newName,
+            $nameElement,
+            $nameElements;
 
         // if pressed ESC - leave the input, if ENTER - process, if other - do nothing
         if (event.which !== 13) {
             if (event.which === 27) {
-                $(this).blur();
+                $input.blur();
             }
 
             return true;
         }
 
-        $input = $(this);
         newName = $input.val();
         $nameElement = $input.hide().siblings('span');
-        nameClassSelector = $nameElement.hasClass('player_name') ? '.player_name' : '.other_name';
+        $nameElements = $nameElement.hasClass('player_name') ? $('.player_name') : $('.other_name');
 
         $.ajax({
             url: '/games/' + gameId,
             method: 'PATCH',
             data: {playerName: newName},
             success: function(data) {
-                customLog({name: newName});
-                $(nameClassSelector).text(newName);
+                console.log({name: newName});
+                $nameElements.text(newName);
                 $nameElement.show();
             }
         });
@@ -346,17 +393,7 @@ var BattleshipsClass = function() {
 
     function newGameClickCallback() {
         if (gameEnded || confirm('Are you sure you want to quit the current game?')) {
-            $battleground.removeClass();
-            gameStarted = false;
-            gameEnded = false;
-            playerStarted = false;
-
-            setTurn(0);
-
-            $('#start').prop('disabled', false);
-            $('#random_shot').hide();
-            $('#random_ships').show();
-            $('div.board').removeClass('hide_ships');
+            location.hash = '';
         }
     }
 
@@ -372,7 +409,7 @@ var BattleshipsClass = function() {
         }
 
         if ($field.is('.miss, .hit')) {
-            customLog('You either already shot this field, or no ship could be there');
+            console.log('You either already shot this field, or no ship could be there');
             return;
         }
 
@@ -562,7 +599,7 @@ var BattleshipsClass = function() {
             return $board.index(this);
         }).toArray();
         if (shipsArray.length !== shipsLength) {
-            customLog('incorrect number of masts');
+            console.log('incorrect number of masts');
             console.info(shipsArray);
             return false;
         }
@@ -579,7 +616,7 @@ var BattleshipsClass = function() {
             bottomRightCorner = (idx[1] < 9) && ($.inArray(shipsArray[i] + 11, shipsArray) !== -1);
 
             if (topRightCorner || bottomRightCorner) {
-                customLog('edge connection');
+                console.log('edge connection');
                 return false;
             }
         }
@@ -612,7 +649,7 @@ var BattleshipsClass = function() {
 
                     // ship is too long
                     if (++k > 4) {
-                        customLog('ship is too long');
+                        console.log('ship is too long');
                         return false;
                     }
                 }
@@ -631,8 +668,8 @@ var BattleshipsClass = function() {
         // strange way to check if ships_types === {1:4, 2:3, 3:2, 4:1}
         for (i in shipsTypes) {
             if (parseInt(i) + shipsTypes[i] !== 5) {
-                customLog('incorrect number of ships of this type');
-                customLog(shipsTypes);
+                console.log('incorrect number of ships of this type');
+                console.log(shipsTypes);
                 return false;
             }
         }
@@ -794,14 +831,6 @@ var BattleshipsClass = function() {
             indexes = indexToArray(index);
 
         return [parseInt(indexes[1]), parseInt(indexes[0])];
-    }
-
-    function customLog(log) {
-        if (debug !== true) {
-            return;
-        }
-
-        console.log(log);
     }
 
     /**
