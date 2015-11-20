@@ -8,6 +8,12 @@ var BattleshipsClass = function() {
         axisY = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J'],
     // battle boards axis X legend
         axisX = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+    // keys after pushing which we type in chatbox (A-Z, 0-9, :,._+)
+        chatboxKeysRanges = '48-57, 59, 65-90, 96-105, 110, 188-191, 219-222',
+    // parse ranges
+        chatboxKeys = [],
+    // prevents focusing on chatbox (usually when pressing ctrl/alt + chatbox_key)
+        chatboxFocusPrevent = false,
     // whether the game has started
         gameStarted = false,
     // whether the game has ended
@@ -27,13 +33,23 @@ var BattleshipsClass = function() {
     // which player's turn is now
         whoseTurn = 0,
     // battle boards
-        $battleground = null,
+        $battleground,
+    // chat
+        $chatbox,
     // authentication token
         gameToken,
     // game Id
         gameId,
     // id of the last event retrieved from API
-        lastIdEvents = 0;
+        lastIdEvents = 0,
+    // updates AJAX object
+        updateXHR = null,
+    // true - updates are requested (updating ON), false - you can start requesting updates (updating OFF),
+        updateExecute = false,
+    // interval between update calls
+        updateInterval = 3000,
+    // setTimeout() return value when waiting update_interval for a new update call
+        lastTimeout = null;
 
     this.run = function() {
         // default settings for AJAX calls
@@ -73,8 +89,17 @@ var BattleshipsClass = function() {
             return index === 0 ? $battleground.slice(0, 100) : $battleground.slice(100);
         };
 
+        $chatbox = $(':text', '#chatbox');
+        // parse key range to array
+        parseChatboxKeys();
+        // when start typing and not focused on text field, focus to type on chatbox
+        $(document).on({keydown: documentKeydownCallback, keyup: documentKeyupCallback});
+
         // board handling
         $battleground.on('click', battlegroundClickCallback);
+
+        // send chat text
+        $chatbox.on('keyup', chatboxKeyupCallback);
 
         // starting the game
         $('#start').on('click', startClickCallback);
@@ -85,6 +110,9 @@ var BattleshipsClass = function() {
             .siblings(':text')
             .on({keyup: nameUpdateTextKeyupCallback, blur: nameUpdateTextBlurCallback});
 
+        // updates management
+        $('#update').on('click', updateClickCallback).toggle(debug);
+
         // starts new game
         $('#new_game').on('click', newGameClickCallback);
 
@@ -93,13 +121,6 @@ var BattleshipsClass = function() {
 
         // set ships randomly
         $('#random_ships').on('click', {retry: 2}, randomShips);
-
-        // check for updates
-        $('#check_update').on('click', {gt: lastIdEvents}, getEvents);
-
-        //gameToken = '00f2ef74057859017ad48d1ff59f7767';
-        //gameId = 63;
-        //return;
 
         $(window).on('hashchange', onHashChange).triggerHandler('hashchange', {first: true});
     };
@@ -126,23 +147,24 @@ var BattleshipsClass = function() {
             gameToken = hashInfo[0];
             gameId = parseInt(hashInfo[1]);
             console.info('Game from hash (token: `%s`, id: %d)', gameToken, gameId);
-            getGame().done(function(event) {
-                getEvents(event).done(function() {
-                    if (playerNumber === 1 && !otherJoined) {
-                        $('#game_link').show();
-                    }
-
-                    if (playerNumber === 2 && !playerJoined) {
-                        addEvent('join_game');
-                    }
-                });
-            });
+            getGame().then(getEvents).done(afterGameStart);
         } else {
-            addGame($('.player_name:first').text()).done(function() {
-                getGame().done(function() {
-                    $('#game_link').show();
-                });
-            });
+            addGame($('.player_name:first').text()).then(getGame).done(afterGameStart);
+        }
+
+        function afterGameStart() {
+            if (playerNumber === 1 && !otherJoined) {
+                $('#game_link').show();
+            }
+
+            if (playerNumber === 2 && !playerJoined) {
+                addEvent('join_game');
+            }
+
+            if (!debug) {
+                // start AJAX calls for updates
+                $('#update').triggerHandler('click');
+            }
         }
     }
 
@@ -181,8 +203,7 @@ var BattleshipsClass = function() {
             success: function(data) {
                 gameStarted = true;
                 $('#start').prop('disabled', true);
-                $('#random_shot, #random_ships').toggle();
-                $('#random_shot').prop('disabled', true).show();
+                $('#random_shot').show();
                 $('#random_ships').hide();
                 setTurn(findWaitingPlayer());
                 addEvent('start_game');
@@ -244,10 +265,11 @@ var BattleshipsClass = function() {
                     }
                     gameStarted = true;
                     $('#start').prop('disabled', true);
-                    $('#random_shot, #random_ships').toggle();
                     $('#random_shot').show();
                     $('#random_ships').hide();
                     setTurn(findWaitingPlayer());
+                } else {
+                    $('#random_ships').prop('disabled', false);
                 }
 
                 playerNumber = data.playerNumber;
@@ -259,11 +281,11 @@ var BattleshipsClass = function() {
     }
 
     /**
-     * @param {Object} event
+     * @param {Object} [data]
      * @return {Object} jqXHR
      */
-    function getEvents(event) {
-        var filters = event.data ? '?' + $.param(event.data) : '';
+    function getEvents(data) {
+        var filters = data ? '?' + $.param(data) : '';
 
         return $.ajax({
             url: '/games/' + gameId + '/events' + filters,
@@ -271,17 +293,45 @@ var BattleshipsClass = function() {
             success: function(data) {
                 handleEvents(data);
                 checkGameEnd();
-                // start AJAX calls for updates
-//                    $('#update').triggerHandler('click');
             }
         });
+    }
+
+    function updateClickCallback() {
+        updateExecute = !updateExecute;
+
+        if (updateExecute) {
+            $(this).text('Updates [ON]');
+            runUpdates();
+        } else {
+            $(this).text('Updates [OFF]');
+            stopUpdates();
+        }
+    }
+
+    function runUpdates() {
+        if (updateExecute !== true) {
+            return;
+        }
+
+        updateXHR = getEvents({gt: lastIdEvents}).done(function() {
+            if (updateExecute !== false) {
+                lastTimeout = setTimeout(runUpdates, updateInterval);
+            }
+        });
+    }
+
+    function stopUpdates() {
+        updateExecute = false;
+        updateXHR.abort();
+        clearTimeout(lastTimeout);
     }
 
     function handleEvents(events) {
         var i,
             event,
             shotResult,
-            lastShot = {},
+            lastShot,
             position,
             $field,
             boardNumber;
@@ -298,7 +348,10 @@ var BattleshipsClass = function() {
 
                 case 'start_game':
                     if (event.player !== playerNumber) {
-                        setTurn(playerNumber - 1);
+                        // @todo figure out how to show turns when player needs to set ships, waits for another player
+                        if (playerNumber === 1) {
+                            setTurn(0);
+                        }
                         otherStarted = true;
                     } else {
                         playerStarted = true;
@@ -327,19 +380,98 @@ var BattleshipsClass = function() {
                     break;
 
                 case 'chat':
-//                        chat_append(event.text, false, event.timestamp);
+                    chatAppend(event.value, (event.player === playerNumber), event.timestamp);
                     break;
             }
 
             lastIdEvents = event.id;
         }
 
-        if (lastShot.result === 'sunk') {
-            checkGameEnd();
-        } else if (lastShot.result === 'miss') {
+        if (lastShot) {
+            if (lastShot.result === 'sunk') {
+                checkGameEnd();
+            }
+
             // @todo from API playerNumber 1|2 while here 0|1
-            setTurn(lastShot.player === playerNumber ? 1 : 0);
+            // my turn either if other missed or I didn't miss (isMiss === isMe same as isNotMiss === isNotMe)
+            setTurn((lastShot.result === 'miss') === (lastShot.player === playerNumber) ? 1 : 0);
         }
+    }
+
+    function chatboxKeyupCallback(event) {
+        var text, commandMatch;
+
+        if (event.which !== 13) {
+            return true;
+        }
+
+        text = $.trim($chatbox.val());
+
+        if (text === '') {
+            return true;
+        }
+
+        // \debug or \nodebug
+        commandMatch = text.match(/^\\(no)?debug$/);
+        if (commandMatch) {
+            // \nodebug
+            if (commandMatch[1]) {
+                localStorage.removeItem('debug');
+                debug = false;
+                if (!updateExecute) {
+                    $('#update').triggerHandler('click');
+                }
+                $('#update').hide();
+            } else {
+                localStorage.setItem('debug', true);
+                debug = true;
+                $('#update').show();
+            }
+
+            $chatbox.val('');
+            return true;
+        }
+
+        $chatbox.prop('disabled', true);
+        addEvent('chat', text).done(function(data) {
+            chatAppend(text, true, data.timestamp);
+            $chatbox.val('').prop('disabled', false);
+        });
+    }
+
+    function parseChatboxKeys() {
+        var keysRanges = chatboxKeysRanges.split(','),
+            range, i, j;
+
+        for (i = 0; i < keysRanges.length; i++) {
+            range = keysRanges[i].split('-');
+
+            if (range.length == 1) {
+                chatboxKeys.push(parseInt(range[0]));
+            } else {
+                for (j = range[0]; j <= range[1]; j++) {
+                    chatboxKeys.push(parseInt(j));
+                }
+            }
+        }
+    }
+
+    function documentKeydownCallback(event) {
+        // if ctr, alt, or cmd (Mac) pressed
+        if ($.inArray(event.which, [17, 18, 91]) !== -1) {
+            chatboxFocusPrevent = true;
+            return true;
+        }
+
+        if (chatboxFocusPrevent || $(event.target).is(':text') || ($.inArray(event.which, chatboxKeys) === -1)) {
+            return true;
+        }
+
+        $chatbox.focus();
+    }
+
+    function documentKeyupCallback() {
+        chatboxFocusPrevent = false;
     }
 
     function nameUpdateClickCallback() {
@@ -562,10 +694,10 @@ var BattleshipsClass = function() {
     }
 
     /**
-     * @param {Number} playerNumber
+     * @param {Number} player
      */
-    function setTurn(playerNumber) {
-        whoseTurn = playerNumber;
+    function setTurn(player) {
+        whoseTurn = player;
         $('.board_menu:eq(' + whoseTurn + ') span').addClass('turn');
         $('.board_menu:eq(' + findWaitingPlayer() + ') span').removeClass('turn');
     }
@@ -807,6 +939,44 @@ var BattleshipsClass = function() {
         } else {
             $board.slice((11 - masts) * 10).addClass('restricted');
         }
+    }
+
+    function chatAppend(text, isMe, timestamp) {
+        var nameClass = isMe ? 'player_name' : 'other_name',
+            name = $('.' + nameClass).first().text(),
+            date = new Date(timestamp),
+            formattedDate = date.getFullYear()
+                + '-' + (date.getMonth() < 10 ? '0' : '') + date.getMonth()
+                + '-' + (date.getDate() < 10 ? '0' : '') + date.getDate()
+                + ' ' + (date.getHours() < 10 ? '0' : '') + date.getHours()
+                + ':' + (date.getMinutes() < 10 ? '0' : '') + date.getMinutes()
+                + ':' + (date.getSeconds() < 10 ? '0' : '') + date.getSeconds(),
+            $time = $('<span>').addClass('time').text('[' + formattedDate + '] '),
+            $chatterName = $('<span>').addClass(nameClass).text(name),
+            $name = $('<span>').addClass('name').append($chatterName).append(': '),
+            $text = $('<span>').text(text),
+            $chatRow = $('<p>').append($time).append($name).append($text),
+            $chats = $('#chatbox div.chats'),
+            $times = $chats.find('.time'),
+            timesLength = $times.length,
+            timesIterator = timesLength - 1;
+
+        // finding a place to put a new row into (in case if new updated chat is older than an existing one)
+        for (timesIterator; timesIterator >= 0; timesIterator--) {
+            if (($times.eq(timesIterator).text().replace(/\[|\]/g, '') <= formattedDate)) {
+                break;
+            }
+        }
+
+        if ((timesLength === 0) || (timesIterator === timesLength - 1)) {
+            $chats.append($chatRow);
+        } else {
+            $chats.children('p').eq(timesIterator + 1).before($chatRow);
+        }
+
+        $chats.clearQueue().animate({
+            scrollTop: $chats.children('p').height() * timesIterator
+        }, 'slow');
     }
 
     /**
