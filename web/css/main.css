@@ -3,15 +3,6 @@ body {
 }
 
 
-/* CSS for notifications */
-.warning {
-    background-color: #feefb3;
-    color: #9f6000;
-    border: 1px solid;
-    padding: 4px;
-    font-size: 13px;
-}
-
 /* CSS for menu */
 div.menu {
     padding: 3px;

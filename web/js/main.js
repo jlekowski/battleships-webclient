@@ -229,7 +229,7 @@ var BattleshipsClass = function() {
     }
 
     /**
-     * @oaram {String} playerName
+     * @param {String} playerName
      * @return {Object} jqXHR
      */
     function addGame(playerName) {
@@ -1029,7 +1029,7 @@ var BattleshipsClass = function() {
             return position[1] > 0 ? new PositionClass([position[0], position[1] - 1], boardNumber) : null;
         };
 
-        this.getRighthPosition = function() {
+        this.getRightPosition = function() {
             return position[1] < 9 ? new PositionClass([position[0], position[1] + 1], boardNumber) : null;
         };
 
@@ -1060,7 +1060,7 @@ var BattleshipsClass = function() {
         this.getSurroundingPositions = function() {
             return [
                 this.getLeftPosition(),
-                this.getRighthPosition(),
+                this.getRightPosition(),
                 this.getTopPosition(),
                 this.getBottomPosition(),
                 this.getLeftTopPosition(),
@@ -1073,7 +1073,7 @@ var BattleshipsClass = function() {
         this.getSidePositions = function() {
             return [
                 this.getLeftPosition(),
-                this.getRighthPosition(),
+                this.getRightPosition(),
                 this.getTopPosition(),
                 this.getBottomPosition()
             ];
