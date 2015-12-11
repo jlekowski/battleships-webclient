@@ -1,4 +1,5 @@
 'use strict';
+// @todo fix name update, fix joined player name, fix double chat msg when I add, fix settting turn
 var BattleshipsClass = function() {
     // events log management
     var debug = !!localStorage.getItem('debug'),
@@ -171,7 +172,11 @@ var BattleshipsClass = function() {
         } else if (hashInfo) {
             setupGame();
         } else {
-            getAvailableGames();
+            getAvailableGames().done(function(data) {
+                if (data.length === 0) {
+                    addGame();
+                }
+            });
         }
 
         function setupGame() {
@@ -315,6 +320,10 @@ var BattleshipsClass = function() {
             success: function(data, textStatus, jqXHR) {
                 gameId = parseInt(jqXHR.getResponseHeader('Location').match(/\d+$/)[0]);
                 console.info('Game created (%d)', gameId);
+                if (otherJoined) {
+                    addEvent('new_game', gameId);
+                    console.info('Other player invited to the new game', gameId);
+                }
                 location.hash = gameId;
             }
         });
@@ -585,8 +594,9 @@ var BattleshipsClass = function() {
         }
 
         newName = $input.val();
+        // @todo find a better way for storing/getting userId
         $.ajax({
-            url: '/users/' + userId,
+            url: '/users/' + JSON.parse(atob(apiKey.split('.')[1])).id,
             method: 'PATCH',
             data: {name: newName},
             success: function(data) {
