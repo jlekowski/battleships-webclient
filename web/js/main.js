@@ -479,6 +479,13 @@ var BattleshipsClass = function() {
                 case 'chat':
                     chatAppend(event.value, (event.player === playerNumber), event.timestamp);
                     break;
+
+                case 'new_game':
+                    checkGameEnd();
+                    if (gameEnded || confirm('Do you want to join ' + $('.other_name:first').text() + ' in new game?')) {
+                        location.hash = event.value;
+                    }
+                    break;
             }
 
             lastIdEvents = event.id;
