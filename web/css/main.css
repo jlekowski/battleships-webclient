@@ -96,15 +96,6 @@ div.board div.hit {
 }
 
 
-/* link for the opponent to join the game */
-#game_link {
-    display: none;
-    float: left;
-    clear: both;
-    margin: 15px 0 -20px 15px;
-}
-
-
 /* chatbox */
 #chatbox {
     float: left;

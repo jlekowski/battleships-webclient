@@ -22,6 +22,7 @@ var BattleshipsClass = function() {
         playerStarted = false,
     // whether opponent started the game
         otherStarted = false,
+    // @todo do I need those joined? (player is kinda always joined now)
     // whether player joined the game
         playerJoined = false,
     // whether opponent joined the game
@@ -37,7 +38,7 @@ var BattleshipsClass = function() {
     // chat
         $chatbox,
     // authentication token
-        gameToken,
+        apiKey = localStorage.getItem('apiKey'),
     // game Id
         gameId,
     // id of the last event retrieved from API
@@ -65,8 +66,8 @@ var BattleshipsClass = function() {
                 }
                 settings.url = baseUrl + settings.url;
                 settings.data = JSON.stringify(settings.data);
-                if (gameToken) {
-                    jqXHR.setRequestHeader('Authorization', 'Bearer ' + gameToken);
+                if (apiKey) {
+                    jqXHR.setRequestHeader('Authorization', 'Bearer ' + apiKey);
                 }
             },
             complete: function(jqXHR, textStatus) {
@@ -111,7 +112,10 @@ var BattleshipsClass = function() {
             .on({keyup: nameUpdateTextKeyupCallback, blur: nameUpdateTextBlurCallback});
 
         // updates management
-        $('#update').on('click', updateClickCallback).toggle(debug);
+        $('#update').on('click', updateClickCallback);
+
+        // what to display depends on debug mode status
+        $('.debug').toggle(debug);
 
         // starts new game
         $('#new_game').on('click', newGameClickCallback);
@@ -122,11 +126,29 @@ var BattleshipsClass = function() {
         // set ships randomly
         $('#random_ships').on('click', {retry: 2}, randomShips);
 
-        $(window).on('hashchange', onHashChange).triggerHandler('hashchange', {first: true});
+        // log out (remove API key)
+        $('#logout').on('click', logout);
+
+        $(window).on('hashchange', onHashChange);
+
+        setupUser().done(function() {
+            $(window).triggerHandler('hashchange', {first: true});
+        });
     };
 
+    /**
+     * @return {Object} Promise
+     */
+    function setupUser() {
+        var userCreatedPromise = apiKey
+            ? $.when()
+            : addUser(prompt('Please enter your name'));
+
+        return userCreatedPromise.then(getUser);
+    }
+
     function onHashChange(event, data) {
-        var hashInfo = location.hash.replace(/^#/, '').split(';');
+        var hashInfo = location.hash.replace(/^#/, '');
 
         // no need to do it after page load
         if (!data || !data.first) {
@@ -142,30 +164,51 @@ var BattleshipsClass = function() {
             $('#random_shot').hide();
             $('#random_ships').prop('disabled', false).show();
         }
+        $('#game_list').text('');
 
-        if (hashInfo.length > 1) {
-            gameToken = hashInfo[0];
-            gameId = parseInt(hashInfo[1]);
-            console.info('Game from hash (token: `%s`, id: %d)', gameToken, gameId);
-            getGame().then(getEvents).done(afterGameStart);
+        if (hashInfo === 'new') {
+            addGame();
+        } else if (hashInfo) {
+            setupGame();
         } else {
-            addGame($('.player_name:first').text()).then(getGame).done(afterGameStart);
+            getAvailableGames();
         }
 
-        function afterGameStart() {
-            if (playerNumber === 1 && !otherJoined) {
-                $('#game_link').show();
-            }
-
-            if (playerNumber === 2 && !playerJoined) {
-                addEvent('join_game');
-            }
-
-            if (!debug) {
-                // start AJAX calls for updates
-                $('#update').triggerHandler('click');
-            }
+        function setupGame() {
+            gameId = parseInt(hashInfo);
+            console.info('Game from hash (id: %d)', gameId);
+            getGame()
+                .then(function(data) {
+                    return data.player ? $.when() : joinGame();
+                })
+                .then(getEvents)
+                .then(function() {
+                    if (!debug) {
+                        // start AJAX calls for updates
+                        $('#update').triggerHandler('click');
+                    }
+                });
         }
+    }
+
+    /**
+     * @return {Object} jqXHR
+     */
+    function getAvailableGames() {
+        return $.ajax({
+            url: '/games?available=true',
+            method: 'GET',
+            success: function(data) {
+                var $gameList = $('#game_list'),
+                    i, row, rowHtml;
+
+                for (i = 0; i < data.length; i++) {
+                    row = data[i];
+                    rowHtml = row.other.name + ' - ' + row.timestamp + ' <a href="#' + row.id + '">Join Game</a>';
+                    $gameList.append($('<p>').html(rowHtml));
+                }
+            }
+        });
     }
 
     function battlegroundClickCallback() {
@@ -212,6 +255,40 @@ var BattleshipsClass = function() {
     }
 
     /**
+     * @return {Object} jqXHR
+     */
+    function getUser() {
+        var userId = JSON.parse(atob(apiKey.split('.')[1])).id;
+
+        return $.ajax({
+            url: '/users/' + userId,
+            method: 'GET',
+            success: function(data) {
+                $('.player_name').text(data.name);
+            }
+        });
+    }
+
+    /**
+     * @param {String} name
+     * @return {Object} jqXHR
+     */
+    function addUser(name) {
+        return $.ajax({
+            url: '/users',
+            method: 'POST',
+            data: {name: name},
+            success: function(data, textStatus, jqXHR) {
+                var userId = parseInt(jqXHR.getResponseHeader('Location').match(/\d+$/)[0]);
+
+                apiKey = jqXHR.getResponseHeader('Api-Key');
+                localStorage.setItem('apiKey', apiKey);
+                console.info('User created (id, apiKey)', userId, apiKey);
+            }
+        });
+    }
+
+    /**
      * @param {String} type
      * @param {String} [value]
      * @return {Object} jqXHR
@@ -229,19 +306,30 @@ var BattleshipsClass = function() {
     }
 
     /**
-     * @param {String} playerName
      * @return {Object} jqXHR
      */
-    function addGame(playerName) {
+    function addGame() {
         return $.ajax({
             url: '/games',
             method: 'POST',
-            data: {playerName: playerName},
             success: function(data, textStatus, jqXHR) {
-                gameToken = jqXHR.getResponseHeader('Game-Token');
                 gameId = parseInt(jqXHR.getResponseHeader('Location').match(/\d+$/)[0]);
-                location.hash = [gameToken, gameId].join(';');
-                console.info('Game created (token, id)', gameToken, gameId);
+                console.info('Game created (%d)', gameId);
+                location.hash = gameId;
+            }
+        });
+    }
+
+    /**
+     * @return {Object} jqXHR
+     */
+    function joinGame() {
+        return $.ajax({
+            url: '/games/' + gameId,
+            method: 'PATCH',
+            data: {joinGame: true},
+            success: function(data) {
+                console.info('Joined game (%d)', gameId);
             }
         });
     }
@@ -273,9 +361,9 @@ var BattleshipsClass = function() {
                 }
 
                 playerNumber = data.playerNumber;
-                $('.player_name').text(data.playerName);
-                $('.other_name').text(data.otherName);
-                $('#game_link span').text(location.href.replace(/#.*$/, '#' + [data.otherHash, gameId].join(';')));
+
+                // @todo mark somehow available space or joined player name
+                $('.other_name').text(data.other ? data.other.name : 'Player 2');
             }
         });
     }
@@ -339,6 +427,7 @@ var BattleshipsClass = function() {
         for (i = 0; i < events.length; i++) {
             event = events[i];
 
+            console.log('event type `%s` and value `%s`', event.type, event.value);
             switch (event.type) {
                 case 'name_update':
                     if (event.player !== playerNumber) {
@@ -362,7 +451,6 @@ var BattleshipsClass = function() {
                 case 'join_game':
                     if (event.player !== playerNumber) {
                         $('.board_menu:eq(1) span').css({fontWeight: 'bold'});
-                        $('#game_link').hide().find('span').text('');
                         otherJoined = true;
                     } else {
                         playerJoined = true;
@@ -485,9 +573,7 @@ var BattleshipsClass = function() {
 
     function nameUpdateTextKeyupCallback(event) {
         var $input = $(this),
-            newName,
-            $nameElement,
-            $nameElements;
+            newName;
 
         // if pressed ESC - leave the input, if ENTER - process, if other - do nothing
         if (event.which !== 13) {
@@ -499,17 +585,15 @@ var BattleshipsClass = function() {
         }
 
         newName = $input.val();
-        $nameElement = $input.hide().siblings('span');
-        $nameElements = $nameElement.hasClass('player_name') ? $('.player_name') : $('.other_name');
-
         $.ajax({
-            url: '/games/' + gameId,
+            url: '/users/' + userId,
             method: 'PATCH',
-            data: {playerName: newName},
+            data: {name: newName},
             success: function(data) {
                 console.log({name: newName});
-                $nameElements.text(newName);
-                $nameElement.show();
+                $('.player_name').text(newName);
+                $input.hide().siblings('span').show();
+                addEvent('name_update', newName);
             }
         });
     }
@@ -525,7 +609,7 @@ var BattleshipsClass = function() {
 
     function newGameClickCallback() {
         if (gameEnded || confirm('Are you sure you want to quit the current game?')) {
-            location.hash = '';
+            location.hash = 'new';
         }
     }
 
@@ -868,6 +952,10 @@ var BattleshipsClass = function() {
         $board.removeClass('restricted');
 
         return true;
+    }
+
+    function logout() {
+        localStorage.removeItem('apiKey');
     }
 
     function markRestrictedStarts($board, masts, orientation) {

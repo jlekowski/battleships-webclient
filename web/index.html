@@ -11,9 +11,10 @@
     <div class="menu">
         <button id="start">Start</button>
         <button id="new_game">New Game</button>
-        <button id="update">Updates [OFF]</button>
+        <button id="update" class="debug">Updates [OFF]</button>
         <button id="random_ships" disabled>Random Ships</button>
         <button id="random_shot">Random Shot</button>
+        <button id="logout" class="debug">Logout</button>
     </div>
     <div class="board_container">
         <div class="board_menu">
@@ -318,7 +319,7 @@
         </div>
     </div>
 
-    <p id="game_link">Temporary link to the game for the opponent: <span></span></p>
+    <div id="game_list" style="clear: both;"></div>
 
     <div id="chatbox">
         <div class="chats"></div>
