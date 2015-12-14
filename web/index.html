@@ -1,20 +1,40 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
     <meta charset="utf-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Battleships</title>
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/2.1.4/jquery.min.js"></script>
+    <link href="https://maxcdn.bootstrapcdn.com/font-awesome/4.5.0/css/font-awesome.min.css" rel="stylesheet"
+          integrity="sha256-3dkvEK0WLHRJ7/Csr0BZjAWxERc5WH7bdeUya2aXxdU= sha512-+L4yy6FRcDGbXJ9mPG8MT/3UCDzwR9gPeyFNMCtInsol++5m3bk2bXWKdZjvybmohrAsn3Ua5x8gfLnbE1YkOg=="
+          crossorigin="anonymous">
+    <!-- Latest compiled and minified CSS -->
+    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.6/css/bootstrap.min.css"
+          integrity="sha384-1q8mTJOASx8j1Au+a5WDVnPi2lkFfwwEAa8hDDdjZlpLegxhjVME1fgjWPGmkzs7"
+          crossorigin="anonymous">
+    <!-- Optional theme -->
+    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.6/css/bootstrap-theme.min.css"
+          integrity="sha384-fLW2N01lMqjakBkx3l/M9EahuwpSfeNvV63J5ezn3uZzapT0u7EYsXMjQV+0En5r"
+          crossorigin="anonymous">
+    <!-- Latest compiled and minified JavaScript -->
+    <script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.6/js/bootstrap.min.js"
+            integrity="sha384-0mSbJDEHialfmuBBQP6A4Qrprq5OVfW37PRR3j5ELqxss1yVqOtnepnHVP9aJ7xS"
+            crossorigin="anonymous"></script>
     <link href="css/main.css" rel="stylesheet" />
-    <script src="http://ajax.googleapis.com/ajax/libs/jquery/2.1.4/jquery.min.js"></script>
     <script src="js/main.js"></script>
 </head>
 <body>
     <div class="menu">
-        <button id="start">Start</button>
-        <button id="new_game">New Game</button>
-        <button id="update" class="debug">Updates [OFF]</button>
-        <button id="random_ships" disabled>Random Ships</button>
-        <button id="random_shot">Random Shot</button>
-        <button id="logout" class="debug">Logout</button>
+        <button id="start" class="btn btn-default btn-xs">Start</button>
+        <button id="new_game" class="btn btn-default btn-xs">New Game</button>
+        <button id="update" class="btn btn-default btn-xs has-spinner debug">
+            <span class="spinner"><i class="fa fa-spin fa-refresh"></i></span>Updates
+        </button>
+        <button id="random_ships" class="btn btn-default btn-xs" disabled>Random Ships</button>
+        <button id="random_shot" class="btn btn-default btn-xs">Random Shot</button>
+        <button id="logout" class="btn btn-default btn-xs debug">Logout</button>
+        <button id="test" class="btn btn-default btn-xs" data-toggle="modal" data-target="#modal">Test</button>
     </div>
     <div class="board_container">
         <div class="board_menu">
@@ -325,7 +345,61 @@
         <div class="chats"></div>
         <div class="prompt">
             <p>&gt;</p>
-            <input type="text" />
+            <input type="text" placeholder="Type your message here..." />
+        </div>
+    </div>
+
+    <div id="modal" class="modal fade" tabindex="-1" role="dialog">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true">&times;</span></button>
+                    <h4 class="modal-title"></h4>
+                </div>
+                <div class="modal-body"></div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-default" data-dismiss="modal">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+
+    <div id="progress-modal" class="modal fade" tabindex="-1" role="dialog">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h4 class="modal-title"></h4>
+                </div>
+                <div class="modal-body">
+                    <div class="progress">
+                        <div class="progress-bar progress-bar-striped active" role="progressbar" aria-valuenow="0"
+                             aria-valuemin="0" aria-valuemax="100" style="min-width: 2em;">0%</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal fade" tabindex="-1" role="dialog">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true">&times;</span></button>
+                    <h4 class="modal-title">Modal title</h4>
+                </div>
+                <div class="modal-body">
+                    <div class="row">
+                        <div class="col-xs-4">Jerzy</div>
+                        <div class="col-xs-4 col-md-offset-1">2 minutes ago</div>
+                        <div class="col-xs-4 col-md-offset-1"><a href="#jerzy" class="btn btn-success btn-xs">Join</a></div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-default" data-dismiss="modal">Close</button>
+                    <button type="button" class="btn btn-primary">New Game</button>
+                </div>
+            </div>
         </div>
     </div>
 </body>

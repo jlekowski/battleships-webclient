@@ -79,6 +79,9 @@ var BattleshipsClass = function() {
                 console.info('Loading STOP');
             },
             error: function(jqXHR) {
+                if (debug) {
+                    showError(jqXHR.responseJSON.message);
+                }
                 console.error(jqXHR.responseJSON);
             },
             dataFilter: function(data, type) {
@@ -130,6 +133,11 @@ var BattleshipsClass = function() {
         // log out (remove API key)
         $('#logout').on('click', logout);
 
+        // prevent on focus on button (I don't like the style)
+        $('button').on('click', function() {
+            $(this).blur();
+        });
+
         $(window).on('hashchange', onHashChange);
 
         setupUser().done(function() {
@@ -141,11 +149,16 @@ var BattleshipsClass = function() {
      * @return {Object} Promise
      */
     function setupUser() {
-        var userCreatedPromise = apiKey
-            ? $.when()
-            : addUser(prompt('Please enter your name'));
+        var userCreatedPromise = $.when();
 
-        return userCreatedPromise.then(getUser);
+        progress.setStages([[10, 40], [60, 80], 100]).modal({title: 'Setting up user details'});
+
+        if (!apiKey) {
+            userCreatedPromise = addUser(prompt('Please enter your name'));
+        }
+        //userCreatedPromise = getUser();
+
+        return userCreatedPromise.then(progress.updateStage).then(getUser).then(progress.updateStage).fail(progress.error);
     }
 
     function onHashChange(event, data) {
@@ -182,17 +195,40 @@ var BattleshipsClass = function() {
         function setupGame() {
             gameId = parseInt(hashInfo);
             console.info('Game from hash (id: %d)', gameId);
+
+            progress.setStages([[0, 5], [30, 40], [60, 80], 100]).modal({title: 'Loading game details'});
+
             getGame()
+                .then(progress.updateStage)
                 .then(function(data) {
                     return data.player ? $.when() : joinGame();
                 })
+                .then(progress.updateStage)
                 .then(getEvents)
+                .then(progress.updateStage)
                 .then(function() {
                     if (!debug) {
                         // start AJAX calls for updates
                         $('#update').triggerHandler('click');
                     }
-                });
+                })
+                .fail(progress.error);
+        }
+    }
+
+    /**
+     * @param {String} msg
+     */
+    function showError(msg) {
+        var $modal = $('.modal:visible'),
+            errorHtml = '<div class="alert alert-danger" role="alert">' + msg + '</div>';
+
+        if ($modal.length > 0) {
+           $modal.find('.modal-body').append(errorHtml);
+        } else {
+            $modal = $('#modal').modal();
+            $modal.find('.modal-body').html(errorHtml);
+            $modal.find('.modal-title').html('Error occurred');
         }
     }
 
@@ -398,12 +434,12 @@ var BattleshipsClass = function() {
         updateExecute = !updateExecute;
 
         if (updateExecute) {
-            $(this).text('Updates [ON]');
             runUpdates();
         } else {
-            $(this).text('Updates [OFF]');
             stopUpdates();
         }
+
+        $(this).toggleClass('active', updateExecute);
     }
 
     function runUpdates() {
@@ -652,6 +688,8 @@ var BattleshipsClass = function() {
         }
 
         shotInProgress = true;
+        $field.html('<i class="fa fa-spin fa-refresh"></i>');
+
         addEvent('shot', getCoords($field)).done(function(data) {
             var position = new PositionClass(getPosition($field), findWaitingPlayer()),
                 shotResult = data.result;
@@ -667,6 +705,7 @@ var BattleshipsClass = function() {
             }
         }).always(function() {
             shotInProgress = false;
+            $field.html('');
         });
     }
 
@@ -1107,6 +1146,69 @@ var BattleshipsClass = function() {
 
         return [parseInt(indexes[1]), parseInt(indexes[0])];
     }
+
+    var progress = (function () {
+        var stages = [],
+            timeout = 0,
+            $progressBar = $('.progress-bar'),
+            $progressModal = $('#progress-modal').modal({keyboard: false, show: false}),
+            //$progressModal = $('#progress-modal').modal({keyboard: false, backdrop: 'static', show: false}),
+            error = function() {
+                clearTimeout(timeout);
+                $progressBar.addClass('progress-bar-danger').removeClass('active');
+
+                return progress;
+            },
+            modal = function(options) {
+                if (options.title) {
+                    $progressModal.find('.modal-title').text(options.title);
+                }
+
+                $progressModal.modal(options);
+
+                return progress;
+            },
+            setStages = function(newStages) {
+                stages = newStages;
+                updateStage();
+
+                return progress;
+            },
+            updateStage = function() {
+                var stage = stages.shift();
+
+                if ($.isArray(stage)) {
+                    setCurrent(stage[0], stage[1]);
+                } else if (stage === undefined) {
+                    setCurrent(100);
+                } else {
+                    setCurrent(stage);
+                }
+
+                return progress;
+            },
+            setCurrent = function(current, max) {
+                clearTimeout(timeout);
+                var progressText = current + '%';
+
+                $progressBar.width(progressText).text(progressText);
+                if (max && (max > current)) {
+                    timeout = setTimeout(function() {
+                        setCurrent(current + 1, max);
+                    }, 300);
+                }
+
+                return progress;
+            };
+
+        return {
+            error: error,
+            modal: modal,
+            setCurrent: setCurrent,
+            setStages: setStages,
+            updateStage: updateStage
+        };
+    })();
 
     /**
      * @param {Array} position
