@@ -38,6 +38,8 @@ var BattleshipsClass = function() {
         $battleground,
     // chat
         $chatbox,
+    // currently displayed modal
+        $currentModal = null,
     // authentication token
         apiKey = localStorage.getItem('apiKey'),
     // game Id
@@ -78,11 +80,18 @@ var BattleshipsClass = function() {
                 }
                 console.info('Loading STOP');
             },
-            error: function(jqXHR) {
-                if (debug) {
-                    showError(jqXHR.responseJSON.message);
+            error: function(jqXHR, textStatus) {
+                var response = jqXHR ? jqXHR.responseJSON : null;
+
+                if (textStatus === 'abort') {
+                    console.info('Request aborted');
+                    return;
                 }
-                console.error(jqXHR.responseJSON);
+
+                if (debug) {
+                    showError(response ? response.message + ' (' + response.code + ')' : 'Unknown error occurred');
+                }
+                console.error(response, textStatus);
             },
             dataFilter: function(data, type) {
                 return (type === 'json' && data === '') ? null : data;
@@ -138,6 +147,12 @@ var BattleshipsClass = function() {
             $(this).blur();
         });
 
+        $('.modal').on('show.bs.modal', function(event) {
+            $currentModal = $(this);
+        }).on('hide.bs.modal', function(event) {
+            $currentModal = null;
+        });
+
         $(window).on('hashchange', onHashChange);
 
         setupUser().done(function() {
@@ -156,9 +171,12 @@ var BattleshipsClass = function() {
         if (!apiKey) {
             userCreatedPromise = addUser(prompt('Please enter your name'));
         }
-        //userCreatedPromise = getUser();
 
-        return userCreatedPromise.then(progress.updateStage).then(getUser).then(progress.updateStage).fail(progress.error);
+        return userCreatedPromise
+            .then(progress.updateStage)
+            .then(getUser)
+            .then(progress.updateStage)
+            .fail(progress.error);
     }
 
     function onHashChange(event, data) {
@@ -181,32 +199,37 @@ var BattleshipsClass = function() {
         $('#game_list').text('');
 
         if (hashInfo === 'new') {
-            addGame();
+            progress.setStages([[20, 40], 100]).modal({title: 'Creating new game'});
+            addGame().done(progress.updateStage);
         } else if (hashInfo) {
             setupGame();
         } else {
-            getAvailableGames().done(function(data) {
-                if (data.length === 0) {
-                    addGame();
-                }
-            });
+            progress.setStages([[20, 40], 100]).modal({title: 'Looking for available games'});
+            getAvailableGames()
+                .done(progress.updateStage)
+                .done(function(data) {
+                    if (data.length === 0) {
+                        location.hash = 'new';
+                    }
+                });
         }
 
         function setupGame() {
             gameId = parseInt(hashInfo);
             console.info('Game from hash (id: %d)', gameId);
 
-            progress.setStages([[0, 5], [30, 40], [60, 80], 100]).modal({title: 'Loading game details'});
+            progress.setStages([[0, 10], [30, 40], [60, 80], 100]).modal({title: 'Loading game details'});
 
             getGame()
-                .then(progress.updateStage)
-                .then(function(data) {
+                .done(progress.updateStage)
+                .done(function(data) {
                     return data.player ? $.when() : joinGame();
                 })
                 .then(progress.updateStage)
                 .then(getEvents)
                 .then(progress.updateStage)
                 .then(function() {
+                    $currentModal.modal('hide');
                     if (!debug) {
                         // start AJAX calls for updates
                         $('#update').triggerHandler('click');
@@ -220,15 +243,14 @@ var BattleshipsClass = function() {
      * @param {String} msg
      */
     function showError(msg) {
-        var $modal = $('.modal:visible'),
-            errorHtml = '<div class="alert alert-danger" role="alert">' + msg + '</div>';
+        var errorHtml = '<div class="alert alert-danger" role="alert">' + msg + '</div>';
 
-        if ($modal.length > 0) {
-           $modal.find('.modal-body').append(errorHtml);
+        if ($currentModal) {
+            $currentModal.find('.modal-body').append(errorHtml);
         } else {
-            $modal = $('#modal').modal();
-            $modal.find('.modal-body').html(errorHtml);
-            $modal.find('.modal-title').html('Error occurred');
+            $('#modal').modal();
+            $currentModal.find('.modal-body').html(errorHtml);
+            $currentModal.find('.modal-title').html('Error occurred');
         }
     }
 
@@ -871,8 +893,7 @@ var BattleshipsClass = function() {
             return $board.index(this);
         }).toArray();
         if (shipsArray.length !== shipsLength) {
-            console.log('incorrect number of masts');
-            console.info(shipsArray);
+            console.log('incorrect number of masts', shipsArray);
             return false;
         }
 
@@ -940,8 +961,7 @@ var BattleshipsClass = function() {
         // strange way to check if ships_types === {1:4, 2:3, 3:2, 4:1}
         for (i in shipsTypes) {
             if (parseInt(i) + shipsTypes[i] !== 5) {
-                console.log('incorrect number of ships of this type');
-                console.log(shipsTypes);
+                console.log('incorrect number of ships of this type', shipsTypes);
                 return false;
             }
         }
@@ -1184,21 +1204,22 @@ var BattleshipsClass = function() {
                 } else {
                     setCurrent(stage);
                 }
-
-                return progress;
             },
             setCurrent = function(current, max) {
                 clearTimeout(timeout);
                 var progressText = current + '%';
 
                 $progressBar.width(progressText).text(progressText);
+
+                if (current === 100) {
+                    $progressBar.removeClass('active');
+                }
+
                 if (max && (max > current)) {
                     timeout = setTimeout(function() {
                         setCurrent(current + 1, max);
                     }, 300);
                 }
-
-                return progress;
             };
 
         return {

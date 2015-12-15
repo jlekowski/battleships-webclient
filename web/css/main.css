@@ -62,6 +62,7 @@ div.board div div {
 div.board div:first-child div {
     border-bottom-color: transparent;
     width: 15px;
+    padding-top: 7px;
 }
 
 div.board div div:first-child {
@@ -165,7 +166,7 @@ div.board div i {
     width: 629px;
 }
 
-/* remove button focus border */
+/* remove focus border */
 .btn:focus, .btn:active {
     outline: none !important;
 }
