@@ -1,5 +1,6 @@
 'use strict';
-// @todo fix name update, fix joined player name, fix double chat msg when I add, fix settting turn
+// @todo fix name update, fix joined player name, fix double chat msg when I add, fix settting turn,
+//          gameStarted (not started yet)
 var BattleshipsClass = function() {
     // events log management
     var debug = !!localStorage.getItem('debug'),
@@ -166,7 +167,7 @@ var BattleshipsClass = function() {
     function setupUser() {
         var userCreatedPromise = $.when();
 
-        progress.setStages([[10, 40], [60, 80], 100]).modal({title: 'Setting up user details'});
+        progress.modal({title: 'Setting up user details', stages: [[10, 40], [60, 80], 100]});
 
         if (!apiKey) {
             userCreatedPromise = addUser(prompt('Please enter your name'));
@@ -199,12 +200,12 @@ var BattleshipsClass = function() {
         $('#game_list').text('');
 
         if (hashInfo === 'new') {
-            progress.setStages([[20, 40], 100]).modal({title: 'Creating new game'});
+            progress.modal({title: 'Creating new game', stages: [[20, 40], 100]});
             addGame().done(progress.updateStage);
         } else if (hashInfo) {
             setupGame();
         } else {
-            progress.setStages([[20, 40], 100]).modal({title: 'Looking for available games'});
+            progress.modal({title: 'Looking for available games', stages: [[20, 40], 100]});
             getAvailableGames()
                 .done(progress.updateStage)
                 .done(function(data) {
@@ -218,18 +219,18 @@ var BattleshipsClass = function() {
             gameId = parseInt(hashInfo);
             console.info('Game from hash (id: %d)', gameId);
 
-            progress.setStages([[0, 10], [30, 40], [60, 80], 100]).modal({title: 'Loading game details'});
+            progress.modal({title: 'Loading game details', stages: [[0, 10], [30, 40], [60, 80], 100]});
 
             getGame()
-                .done(progress.updateStage)
-                .done(function(data) {
+                .then(function(data) {
+                    progress.updateStage();
+
                     return data.player ? $.when() : joinGame();
                 })
                 .then(progress.updateStage)
                 .then(getEvents)
                 .then(progress.updateStage)
                 .then(function() {
-                    $currentModal.modal('hide');
                     if (!debug) {
                         // start AJAX calls for updates
                         $('#update').triggerHandler('click');
@@ -1176,23 +1177,22 @@ var BattleshipsClass = function() {
             error = function() {
                 clearTimeout(timeout);
                 $progressBar.addClass('progress-bar-danger').removeClass('active');
-
-                return progress;
             },
             modal = function(options) {
+                if (options.stages) {
+                    setStages(options.stages);
+                }
+
                 if (options.title) {
                     $progressModal.find('.modal-title').text(options.title);
                 }
 
                 $progressModal.modal(options);
-
-                return progress;
             },
             setStages = function(newStages) {
+                $progressBar.removeClass('progress-bar-success progress-bar-danger').addClass('active');
                 stages = newStages;
                 updateStage();
-
-                return progress;
             },
             updateStage = function() {
                 var stage = stages.shift();
@@ -1212,10 +1212,11 @@ var BattleshipsClass = function() {
                 $progressBar.width(progressText).text(progressText);
 
                 if (current === 100) {
-                    $progressBar.removeClass('active');
-                }
-
-                if (max && (max > current)) {
+                    $progressBar.addClass('progress-bar-success').removeClass('active');
+                    timeout = setTimeout(function() {
+                        $progressModal.modal('hide');
+                    }, 500);
+                } else if (max && (max > current)) {
                     timeout = setTimeout(function() {
                         setCurrent(current + 1, max);
                     }, 300);
