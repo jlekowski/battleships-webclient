@@ -167,11 +167,12 @@ var BattleshipsClass = function() {
     function setupUser() {
         var userCreatedPromise = $.when();
 
-        progress.modal({title: 'Setting up user details', stages: [[10, 40], [60, 80], 100]});
+        progress.modal({title: 'Setting up user details', stages: [0, [10, 40], [60, 80], 100]});
 
         if (!apiKey) {
             userCreatedPromise = addUser(prompt('Please enter your name'));
         }
+        progress.updateStage();
 
         return userCreatedPromise
             .then(progress.updateStage)
@@ -196,6 +197,7 @@ var BattleshipsClass = function() {
             $('#start').prop('disabled', false);
             $('#random_shot').hide();
             $('#random_ships').prop('disabled', false).show();
+            $('.board_menu:eq(1) span').css({fontWeight: ''});
         }
         $('#game_list').text('');
 
@@ -288,32 +290,40 @@ var BattleshipsClass = function() {
     }
 
     function startClickCallback() {
+        var $button = $(this),
+            $board = $battleground.board(0),
+            playerShips;
+
         if (gameStarted) {
             alert('You have already started the game');
             return false;
         }
 
-        var $board = $battleground.board(0);
         if (checkShips($board) === false) {
             alert('There is either not enough ships or they\'re set incorrectly');
             return false;
         }
 
-        var playerShips = $board.filter('.ship').map(function() {
+        playerShips = $board.filter('.ship').map(function() {
             return getCoords(this);
         }).toArray();
 
+        $button.addClass('active');
+        // @todo move to a separate function
         $.ajax({
             url: '/games/' + gameId,
             method: 'PATCH',
             data: {playerShips: playerShips},
             success: function(data) {
-                gameStarted = true;
-                $('#start').prop('disabled', true);
-                $('#random_shot').show();
-                $('#random_ships').hide();
-                setTurn(findWaitingPlayer());
-                addEvent('start_game');
+                addEvent('start_game').done(function() {
+                    gameStarted = true;
+                    $button.removeClass('active').prop('disabled', true);
+                    $('#random_shot').show();
+                    $('#random_ships').hide();
+                    if (playerNumber === 1) {
+                        setTurn(0);
+                    }
+                });
             }
         });
     }
@@ -377,12 +387,15 @@ var BattleshipsClass = function() {
             url: '/games',
             method: 'POST',
             success: function(data, textStatus, jqXHR) {
-                gameId = parseInt(jqXHR.getResponseHeader('Location').match(/\d+$/)[0]);
-                console.info('Game created (%d)', gameId);
+                var newGameId = parseInt(jqXHR.getResponseHeader('Location').match(/\d+$/)[0]);
+
+                console.info('Game created (%d)', newGameId);
                 if (otherJoined) {
-                    addEvent('new_game', gameId);
-                    console.info('Other player invited to the new game', gameId);
+                    addEvent('new_game', newGameId);
+                    console.info('Other player invited to the new game', newGameId);
                 }
+
+                gameId = newGameId;
                 location.hash = gameId;
             }
         });
@@ -540,9 +553,11 @@ var BattleshipsClass = function() {
                     break;
 
                 case 'new_game':
-                    checkGameEnd();
-                    if (gameEnded || confirm('Do you want to join ' + $('.other_name:first').text() + ' in new game?')) {
-                        location.hash = event.value;
+                    if (event.player !== playerNumber) {
+                        checkGameEnd();
+                        if (gameEnded || confirm('Do you want to join ' + $('.other_name:first').text() + ' in the new game?')) {
+                            location.hash = event.value;
+                        }
                     }
                     break;
             }
@@ -714,7 +729,7 @@ var BattleshipsClass = function() {
         $field.html('<i class="fa fa-spin fa-refresh"></i>');
 
         addEvent('shot', getCoords($field)).done(function(data) {
-            var position = new PositionClass(getPosition($field), findWaitingPlayer()),
+            var position = new PositionClass(getPosition($field), 1),
                 shotResult = data.result;
 
             markShot(position, shotResult);
