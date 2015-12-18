@@ -549,7 +549,9 @@ var BattleshipsClass = function() {
                     break;
 
                 case 'chat':
-                    chatAppend(event.value, (event.player === playerNumber), event.timestamp);
+                    if (event.id > lastIdEvents) {
+                        chatAppend(event.value, (event.player === playerNumber), event.timestamp);
+                    }
                     break;
 
                 case 'new_game':
@@ -726,7 +728,7 @@ var BattleshipsClass = function() {
         }
 
         shotInProgress = true;
-        $field.html('<i class="fa fa-spin fa-refresh"></i>');
+        $field.addClass('shot');
 
         addEvent('shot', getCoords($field)).done(function(data) {
             var position = new PositionClass(getPosition($field), 1),
@@ -743,7 +745,7 @@ var BattleshipsClass = function() {
             }
         }).always(function() {
             shotInProgress = false;
-            $field.html('');
+            $field.removeClass('shot');
         });
     }
 

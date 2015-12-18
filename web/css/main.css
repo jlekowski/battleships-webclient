@@ -74,20 +74,26 @@ div.board div div:first-child {
 
 /* CSS for board cells */
 div.board div.ship {
-    background-color: #00f;
-}
-
-div.board div.miss {
-    background-color: #f00;
+    background-color: rgba(0, 173, 255, 0.25);
 }
 
 div.board div.hit {
-    background-color: #88f;
+    background-color: rgba(232, 0, 0, 0.25);
 }
 
 /* Style for field icons */
 div.board div i {
     padding: 8px;
+}
+
+div.board div div:not(.shot) i.fa-refresh,
+div.board div div.hit i.fa-refresh,
+div.board div div.miss i.fa-refresh,
+div.board div div:not(.ship) i.fa-ship,
+div.board div div.hit i.fa-ship,
+div.board div div:not(.hit) i.fa-bomb,
+div.board div div:not(.miss) i.fa-sun-o {
+    display: none;
 }
 
 
