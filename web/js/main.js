@@ -165,16 +165,14 @@ var BattleshipsClass = function() {
      * @return {Object} Promise
      */
     function setupUser() {
-        var userCreatedPromise = $.when();
-
-        progress.modal({title: 'Setting up user details', stages: [0, [10, 40], [60, 80], 100]});
-
-        if (!apiKey) {
-            userCreatedPromise = addUser(prompt('Please enter your name'));
-        }
-        progress.updateStage();
+        var userCreatedPromise = apiKey ? $.when() : showPrompt('Please enter your name');
 
         return userCreatedPromise
+            .then(function(playerName) {
+                progress.modal({title: 'Setting up user details', stages: [[10, 40], [60, 80], 100]});
+
+                return apiKey ? $.when() : addUser(playerName);
+            })
             .then(progress.updateStage)
             .then(getUser)
             .then(progress.updateStage)
@@ -199,7 +197,6 @@ var BattleshipsClass = function() {
             $('#random_ships').prop('disabled', false).show();
             $('.board_menu:eq(1) span').css({fontWeight: ''});
         }
-        $('#game_list').text('');
 
         if (hashInfo === 'new') {
             progress.modal({title: 'Creating new game', stages: [[20, 40], 100]});
@@ -225,6 +222,29 @@ var BattleshipsClass = function() {
 
             getGame()
                 .then(function(data) {
+                    var key,
+                        $field,
+                        $board = $battleground.board(0);
+
+                    if (data.playerShips.length > 0) {
+                        for (key in data.playerShips) {
+                            $field = getFieldByCoords(data.playerShips[key], $board);
+                            $field.addClass('ship');
+                        }
+                        gameStarted = true;
+                        $('#start').prop('disabled', true);
+                        $('#random_shot').show();
+                        $('#random_ships').hide();
+                        setTurn(findWaitingPlayer());
+                    } else {
+                        $('#random_ships').prop('disabled', false);
+                    }
+
+                    playerNumber = data.playerNumber;
+
+                    // @todo mark somehow available space or joined player name
+                    $('.other_name').text(data.other ? data.other.name : 'Player 2');
+
                     progress.updateStage();
 
                     return data.player ? $.when() : joinGame();
@@ -249,12 +269,49 @@ var BattleshipsClass = function() {
         var errorHtml = '<div class="alert alert-danger" role="alert">' + msg + '</div>';
 
         if ($currentModal) {
-            $currentModal.find('.modal-body').append(errorHtml);
+            $currentModal.data('hide', false).find('.modal-body').append(errorHtml);
         } else {
             $('#modal').modal();
             $currentModal.find('.modal-body').html(errorHtml);
             $currentModal.find('.modal-title').html('Error occurred');
         }
+    }
+
+    /**
+     * @param {String} msg
+     * @return {Object} Promise
+     */
+    function showPrompt(msg) {
+        var promise = $.Deferred(),
+            $input = $('<input type="text" placeholder="'+ msg + '" class="form-control" />'),
+            existingModal = !!$currentModal;
+
+        if (existingModal) {
+            $currentModal.data('hide', false).find('.modal-body').append($input);
+        } else {
+            $('#modal').modal();
+            $currentModal.find('.modal-body').html($input);
+            $currentModal.find('.modal-title').html(msg);
+        }
+
+        $currentModal.on('shown.bs.modal', function(event) {
+            $input.focus();
+        });
+
+        $input.on('keyup', function(event) {
+            // hide on Enter
+            if (event.which === 13) {
+                if (existingModal) {
+                    $input.remove();
+                } else {
+                    $currentModal.modal('hide');
+                }
+
+                promise.resolve($input.val());
+            }
+        });
+
+        return promise;
     }
 
     /**
@@ -265,14 +322,35 @@ var BattleshipsClass = function() {
             url: '/games?available=true',
             method: 'GET',
             success: function(data) {
-                var $gameList = $('#game_list'),
-                    i, row, rowHtml;
+                var $gameList = $('<div id="game_list">'),
+                    rowHtml = '',
+                    date, formattedDate, game, i;
 
                 for (i = 0; i < data.length; i++) {
-                    row = data[i];
-                    rowHtml = row.other.name + ' - ' + row.timestamp + ' <a href="#' + row.id + '">Join Game</a>';
-                    $gameList.append($('<p>').html(rowHtml));
+                    game = data[i];
+                    date = new Date(game.timestamp);
+                    formattedDate = date.getFullYear()
+                        + '-' + (date.getMonth() + 1 < 10 ? '0' : '') + (date.getMonth() + 1)
+                        + '-' + (date.getDate() < 10 ? '0' : '') + date.getDate()
+                        + ' ' + (date.getHours() < 10 ? '0' : '') + date.getHours()
+                        + ':' + (date.getMinutes() < 10 ? '0' : '') + date.getMinutes()
+                        + ':' + (date.getSeconds() < 10 ? '0' : '') + date.getSeconds();
+
+                    rowHtml += '<div class="row">';
+                    rowHtml += '<div class="col-xs-4">' + game.other.name + '</div>';
+                    rowHtml += '<div class="col-xs-4">' + formattedDate + '</div>';
+                    rowHtml += '<div class="col-xs-4"><a href="#' + game.id + '" class="btn btn-success btn-xs">Join</a></div>';
+                    rowHtml += '</div>';
                 }
+
+                if ($currentModal) {
+                    $currentModal.data('hide', false);
+                } else {
+                    $('#modal').modal();
+                    $currentModal.find('.modal-title').html('Join a game or create a new one');
+                }
+
+                $currentModal.find('.modal-body').append($gameList.html(rowHtml));
             }
         });
     }
@@ -290,41 +368,45 @@ var BattleshipsClass = function() {
     }
 
     function startClickCallback() {
-        var $button = $(this),
+        var $startButton = $(this),
             $board = $battleground.board(0),
+            $randomShipsButton = $('#random_ships'),
             playerShips;
 
         if (gameStarted) {
-            alert('You have already started the game');
+            showError('You have already started the game');
             return false;
         }
 
         if (checkShips($board) === false) {
-            alert('There is either not enough ships or they\'re set incorrectly');
+            showError('There is either not enough ships or they\'re set incorrectly');
             return false;
         }
+
+        $startButton.addClass('active');
+        $randomShipsButton.prop('disabled', true);
 
         playerShips = $board.filter('.ship').map(function() {
             return getCoords(this);
         }).toArray();
 
-        $button.addClass('active');
         // @todo move to a separate function
         $.ajax({
             url: '/games/' + gameId,
             method: 'PATCH',
-            data: {playerShips: playerShips},
-            success: function(data) {
-                addEvent('start_game').done(function() {
-                    gameStarted = true;
-                    $button.removeClass('active').prop('disabled', true);
-                    $('#random_shot').show();
-                    $('#random_ships').hide();
-                    if (playerNumber === 1) {
-                        setTurn(0);
-                    }
-                });
+            data: {playerShips: playerShips}
+        }).then(function() {
+            return addEvent('start_game');
+        }).then(function() {
+            gameStarted = true;
+            $startButton.removeClass('active').prop('disabled', true);
+            $('#random_shot').show();
+            $randomShipsButton.hide();
+            if (playerNumber === 1) {
+                setTurn(0);
             }
+        }).fail(function() {
+            $randomShipsButton.prop('disabled', false);
         });
     }
 
@@ -421,31 +503,7 @@ var BattleshipsClass = function() {
     function getGame() {
         return $.ajax({
             url: '/games/' + gameId,
-            method: 'GET',
-            success: function(data) {
-                var key,
-                    $field,
-                    $board = $battleground.board(0);
-
-                if (data.playerShips.length > 0) {
-                    for (key in data.playerShips) {
-                        $field = getFieldByCoords(data.playerShips[key], $board);
-                        $field.addClass('ship');
-                    }
-                    gameStarted = true;
-                    $('#start').prop('disabled', true);
-                    $('#random_shot').show();
-                    $('#random_ships').hide();
-                    setTurn(findWaitingPlayer());
-                } else {
-                    $('#random_ships').prop('disabled', false);
-                }
-
-                playerNumber = data.playerNumber;
-
-                // @todo mark somehow available space or joined player name
-                $('.other_name').text(data.other ? data.other.name : 'Player 2');
-            }
+            method: 'GET'
         });
     }
 
@@ -532,7 +590,14 @@ var BattleshipsClass = function() {
                 case 'join_game':
                     if (event.player !== playerNumber) {
                         $('.board_menu:eq(1) span').css({fontWeight: 'bold'});
-                        otherJoined = true;
+                        getGame().done(function(data) {
+                            if (data.other) {
+                                $('.other_name').text(data.other.name);
+                                otherJoined = true;
+                            } else {
+                                showError('Expected to get other player name after joining the game :/');
+                            }
+                        });
                     } else {
                         playerJoined = true;
                     }
@@ -549,6 +614,7 @@ var BattleshipsClass = function() {
                     break;
 
                 case 'chat':
+                    // to prevent appending chat I just sent (and appended)
                     if (event.id > lastIdEvents) {
                         chatAppend(event.value, (event.player === playerNumber), event.timestamp);
                     }
@@ -707,23 +773,28 @@ var BattleshipsClass = function() {
     }
 
     function shot($field) {
-        if (!gameStarted) {
-            alert('You can\'t shoot at the moment - game has not started');
-            return;
-        }
+        var logMsg = '';
 
-        if (whoseTurn !== 0) {
-            alert('It\'s other player\'s turn');
-            return;
-        }
-
-        if ($field.is('.miss, .hit')) {
+        if ($field.is('.miss, .hit, .shot')) {
             console.log('You either already shot this field, or no ship could be there');
             return;
         }
 
-        if (shotInProgress) {
-            alert('Shot in progress - wait for the result first');
+        if (whoseTurn !== 0 || shotInProgress || !gameStarted) {
+            $field.addClass('shot').find('i:visible').fadeOut('slow', function() {
+                $(this).css('display', '');
+                $field.removeClass('shot');
+            });
+
+            if (shotInProgress) {
+                logMsg = 'Shot in progress - wait for the result first';
+            } else if (!gameStarted) {
+                logMsg = 'You can\'t shoot at the moment - game has not started';
+            } else {
+                logMsg = 'It\'s other player\'s turn';
+            }
+
+            console.info(logMsg);
             return;
         }
 
@@ -1011,7 +1082,7 @@ var BattleshipsClass = function() {
             k;
 
         if (gameStarted) {
-            alert('You can\'t set ships - the game has already started');
+            showError('You can\'t set ships - the game has already started');
             return false;
         }
 
@@ -1128,7 +1199,7 @@ var BattleshipsClass = function() {
             name = $('.' + nameClass).first().text(),
             date = new Date(timestamp),
             formattedDate = date.getFullYear()
-                + '-' + (date.getMonth() < 10 ? '0' : '') + date.getMonth()
+                + '-' + (date.getMonth() + 1 < 10 ? '0' : '') + (date.getMonth() + 1)
                 + '-' + (date.getDate() < 10 ? '0' : '') + date.getDate()
                 + ' ' + (date.getHours() < 10 ? '0' : '') + date.getHours()
                 + ':' + (date.getMinutes() < 10 ? '0' : '') + date.getMinutes()
@@ -1231,7 +1302,9 @@ var BattleshipsClass = function() {
                 if (current === 100) {
                     $progressBar.addClass('progress-bar-success').removeClass('active');
                     timeout = setTimeout(function() {
-                        $progressModal.modal('hide');
+                        if ($progressModal.data('hide') !== false) {
+                            $progressModal.modal('hide');
+                        }
                     }, 500);
                 } else if (max && (max > current)) {
                     timeout = setTimeout(function() {
