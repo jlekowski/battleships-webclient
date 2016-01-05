@@ -25,8 +25,6 @@ var BattleshipsClass = function() {
     // whether opponent started the game
         otherStarted = false,
     // @todo do I need those joined? (player is kinda always joined now)
-    // whether player joined the game
-        playerJoined = false,
     // whether opponent joined the game
         otherJoined = false,
     // prevents shooting
@@ -180,29 +178,37 @@ var BattleshipsClass = function() {
     }
 
     function onHashChange(event, data) {
-        var hashInfo = location.hash.replace(/^#/, '');
+        var hashInfo = location.hash.replace(/^#/, ''),
+            resumeFunction = $.noop();
 
         // no need to do it after page load
         if (!data || !data.first) {
             $battleground.removeClass();
-            gameStarted = false;
             gameEnded = false;
-            playerStarted = false;
-            otherStarted = false;
-
+            setPlayerStarted(false, true);
+            setPlayerStarted(false, false);
             setTurn(0);
-
-            $('#start').prop('disabled', false);
-            $('#random_shot').hide();
-            $('#random_ships').prop('disabled', false).show();
             $('.board_menu:eq(1) span').css({fontWeight: ''});
+        }
+
+        // stop looking for updates when changing game - may try to get updates for a game before joining it
+        if (updateExecute || !debug) {
+            // (re)start AJAX calls for updates
+            resumeFunction = function() {
+                $('#update').triggerHandler('click');
+            };
+
+            // stop AJAX calls for updates
+            if (updateExecute) {
+                resumeFunction();
+            }
         }
 
         if (hashInfo === 'new') {
             progress.modal({title: 'Creating new game', stages: [[20, 40], 100]});
-            addGame().done(progress.updateStage);
+            addGame().done(progress.updateStage, resumeFunction);
         } else if (hashInfo) {
-            setupGame();
+            setupGame().done(resumeFunction);
         } else {
             progress.modal({title: 'Looking for available games', stages: [[20, 40], 100]});
             getAvailableGames()
@@ -220,27 +226,24 @@ var BattleshipsClass = function() {
 
             progress.modal({title: 'Loading game details', stages: [[0, 10], [30, 40], [60, 80], 100]});
 
-            getGame()
+            return getGame()
                 .then(function(data) {
                     var key,
                         $field,
                         $board = $battleground.board(0);
+
+                    playerNumber = data.playerNumber;
 
                     if (data.playerShips.length > 0) {
                         for (key in data.playerShips) {
                             $field = getFieldByCoords(data.playerShips[key], $board);
                             $field.addClass('ship');
                         }
-                        gameStarted = true;
-                        $('#start').prop('disabled', true);
-                        $('#random_shot').show();
-                        $('#random_ships').hide();
-                        setTurn(findWaitingPlayer());
-                    } else {
-                        $('#random_ships').prop('disabled', false);
-                    }
 
-                    playerNumber = data.playerNumber;
+                        setPlayerStarted(true, true);
+                    } else {
+                        setPlayerStarted(false, true);
+                    }
 
                     // @todo mark somehow available space or joined player name
                     $('.other_name').text(data.other ? data.other.name : 'Player 2');
@@ -252,14 +255,33 @@ var BattleshipsClass = function() {
                 .then(progress.updateStage)
                 .then(getEvents)
                 .then(progress.updateStage)
-                .then(function() {
-                    if (!debug) {
-                        // start AJAX calls for updates
-                        $('#update').triggerHandler('click');
-                    }
-                })
                 .fail(progress.error);
         }
+    }
+
+    /**
+     * @param {Boolean} hasStarted
+     * @param {Boolean} isMe
+     */
+    function setPlayerStarted(hasStarted, isMe) {
+        if (isMe) {
+            playerStarted = hasStarted;
+            $('#random_ships').prop('disabled', hasStarted).toggle(!hasStarted);
+            $('#start').prop('disabled', hasStarted);
+        } else {
+            otherStarted = hasStarted;
+        }
+
+        setGameStarted(playerStarted && otherStarted);
+    }
+
+    /**
+     * @param {Boolean} hasStarted
+     */
+    function setGameStarted(hasStarted) {
+        gameStarted = hasStarted;
+
+        $('#random_shot').toggle(hasStarted);
     }
 
     /**
@@ -275,6 +297,50 @@ var BattleshipsClass = function() {
             $currentModal.find('.modal-body').html(errorHtml);
             $currentModal.find('.modal-title').html('Error occurred');
         }
+    }
+
+    /**
+     * @param {String} msg
+     * @param {Object} [data]
+     * @return {Object} Promise
+     */
+    function showConfirm(msg, data) {
+        var promise = $.Deferred(),
+            $modal = $('#modal'),
+            $modalFooter = $('<div class="modal-footer">');
+
+        $modal.find('.modal-body').addClass('bg-primary').html('<h4>'+ msg + '</h4>');
+        $modal.find('.modal-title').html('Confirm');
+
+        $modalFooter.append('<button type="button" class="btn btn-danger">No</button>');
+        $modalFooter.append('<button type="button" class="btn btn-success" data-confirmed="true">Yes</button>');
+
+        $modal.find('.modal-content').append($modalFooter);
+
+        $('button', $modal).on('click', function(event, hidden) {
+            promise.resolve($(this).data('confirmed') === true, data);
+            $modalFooter.remove();
+            $modal.find('.modal-body').removeClass('bg-primary');
+
+            if (($modal.data('hide') !== false) && (hidden !== true)) {
+                $modal.modal('hide');
+            }
+        });
+
+        $modal.on('shown.bs.modal', function () {
+            $('button:last', $modal).focus();
+        });
+
+        $modal.on('hide.bs.modal', function() {
+            $('button:first', $modal).triggerHandler('click', true);
+        });
+
+        if ($currentModal) {
+            $currentModal.modal('hide');
+        }
+        $modal.modal({backdrop: false});
+
+        return promise;
     }
 
     /**
@@ -322,26 +388,35 @@ var BattleshipsClass = function() {
             url: '/games?available=true',
             method: 'GET',
             success: function(data) {
-                var $gameList = $('<div id="game_list">'),
-                    rowHtml = '',
-                    date, formattedDate, game, i;
+                var $gameList, rowHtml, game, i;
+
+                if (data.length === 0) {
+                    return;
+                }
+
+                $gameList = $('<table class="table table-striped">');
+                $gameList.append('<thead><tr><th>Player name</th><th>Game created</th><th>Action</th></tr></thead>');
+
+                rowHtml = '<tbody>';
+
+                rowHtml += '<tr class="info">';
+                rowHtml += '<td>' + $('.player_name:first').text() + '</td>';
+                rowHtml += '<td></td>';
+                rowHtml += '<td><a href="#new" class="btn btn-info btn-xs">Create New</a></td>';
+                rowHtml += '</tr>';
 
                 for (i = 0; i < data.length; i++) {
                     game = data[i];
-                    date = new Date(game.timestamp);
-                    formattedDate = date.getFullYear()
-                        + '-' + (date.getMonth() + 1 < 10 ? '0' : '') + (date.getMonth() + 1)
-                        + '-' + (date.getDate() < 10 ? '0' : '') + date.getDate()
-                        + ' ' + (date.getHours() < 10 ? '0' : '') + date.getHours()
-                        + ':' + (date.getMinutes() < 10 ? '0' : '') + date.getMinutes()
-                        + ':' + (date.getSeconds() < 10 ? '0' : '') + date.getSeconds();
 
-                    rowHtml += '<div class="row">';
-                    rowHtml += '<div class="col-xs-4">' + game.other.name + '</div>';
-                    rowHtml += '<div class="col-xs-4">' + formattedDate + '</div>';
-                    rowHtml += '<div class="col-xs-4"><a href="#' + game.id + '" class="btn btn-success btn-xs">Join</a></div>';
-                    rowHtml += '</div>';
+                    rowHtml += '<tr>';
+                    rowHtml += '<td>' + game.other.name + '</td>';
+                    rowHtml += '<td>' + formatDate(new Date(game.timestamp)) + '</td>';
+                    rowHtml += '<td><a href="#' + game.id + '" class="btn btn-success btn-xs">Join</a></td>';
+                    rowHtml += '</tr>';
                 }
+
+                rowHtml += '</tbody>';
+                $gameList.append(rowHtml);
 
                 if ($currentModal) {
                     $currentModal.data('hide', false);
@@ -350,7 +425,12 @@ var BattleshipsClass = function() {
                     $currentModal.find('.modal-title').html('Join a game or create a new one');
                 }
 
-                $currentModal.find('.modal-body').append($gameList.html(rowHtml));
+                $('a', $gameList).on('click', function() {
+                    $gameList.remove();
+                    $currentModal.data('hide', true);
+                });
+
+                $currentModal.find('.modal-body').append($gameList);
             }
         });
     }
@@ -398,13 +478,9 @@ var BattleshipsClass = function() {
         }).then(function() {
             return addEvent('start_game');
         }).then(function() {
-            gameStarted = true;
-            $startButton.removeClass('active').prop('disabled', true);
-            $('#random_shot').show();
-            $randomShipsButton.hide();
-            if (playerNumber === 1) {
-                setTurn(0);
-            }
+            setPlayerStarted(true, true);
+            $startButton.removeClass('active');
+            setTurn(gameStarted && playerNumber === 1 ? 0 : 1);
         }).fail(function() {
             $randomShipsButton.prop('disabled', false);
         });
@@ -453,11 +529,7 @@ var BattleshipsClass = function() {
         return $.ajax({
             url: '/games/' + gameId + '/events',
             method: 'POST',
-            data: {type: type, value: value},
-            success: function(data, textStatus, jqXHR) {
-                // @todo DRY
-                lastIdEvents = parseInt(jqXHR.getResponseHeader('Location').match(/\d+$/)[0]);
-            }
+            data: {type: type, value: value}
         });
     }
 
@@ -469,10 +541,11 @@ var BattleshipsClass = function() {
             url: '/games',
             method: 'POST',
             success: function(data, textStatus, jqXHR) {
+                // @todo DRY
                 var newGameId = parseInt(jqXHR.getResponseHeader('Location').match(/\d+$/)[0]);
 
                 console.info('Game created (%d)', newGameId);
-                if (otherJoined) {
+                if (otherJoined || playerNumber === 2) {
                     addEvent('new_game', newGameId);
                     console.info('Other player invited to the new game', newGameId);
                 }
@@ -541,7 +614,7 @@ var BattleshipsClass = function() {
             return;
         }
 
-        updateXHR = getEvents({gt: lastIdEvents}).done(function() {
+        updateXHR = getEvents({gt: lastIdEvents, player: (playerNumber === 1 ? 2 : 1)}).done(function() {
             if (updateExecute !== false) {
                 lastTimeout = setTimeout(runUpdates, updateInterval);
             }
@@ -561,12 +634,13 @@ var BattleshipsClass = function() {
             lastShot,
             position,
             $field,
-            boardNumber;
+            boardNumber,
+            promise;
 
         for (i = 0; i < events.length; i++) {
             event = events[i];
 
-            console.log('event type `%s` and value `%s`', event.type, event.value);
+            console.log('event type `%s` and value `%s` for player `%s`', event.type, event.value, event.player);
             switch (event.type) {
                 case 'name_update':
                     if (event.player !== playerNumber) {
@@ -575,16 +649,9 @@ var BattleshipsClass = function() {
                     break;
 
                 case 'start_game':
-                    if (event.player !== playerNumber) {
-                        // @todo figure out how to show turns when player needs to set ships, waits for another player
-                        if (playerNumber === 1) {
-                            setTurn(0);
-                        }
-                        otherStarted = true;
-                    } else {
-                        playerStarted = true;
-                    }
-                    gameStarted = playerStarted && otherStarted;
+                    setPlayerStarted(true, event.player === playerNumber);
+                    // @todo figure out how to show turns when player needs to set ships, waits for another player
+                    setTurn(gameStarted && playerNumber === 1 ? 0 : 1);
                     break;
 
                 case 'join_game':
@@ -598,8 +665,6 @@ var BattleshipsClass = function() {
                                 showError('Expected to get other player name after joining the game :/');
                             }
                         });
-                    } else {
-                        playerJoined = true;
                     }
                     break;
 
@@ -614,18 +679,21 @@ var BattleshipsClass = function() {
                     break;
 
                 case 'chat':
-                    // to prevent appending chat I just sent (and appended)
-                    if (event.id > lastIdEvents) {
-                        chatAppend(event.value, (event.player === playerNumber), event.timestamp);
-                    }
+                    chatAppend(event.value, (event.player === playerNumber), event.timestamp);
                     break;
 
                 case 'new_game':
                     if (event.player !== playerNumber) {
                         checkGameEnd();
-                        if (gameEnded || confirm('Do you want to join ' + $('.other_name:first').text() + ' in the new game?')) {
-                            location.hash = event.value;
-                        }
+                        promise = gameEnded
+                            ? $.when(true, event.value)
+                            : showConfirm('Do you want to join ' + $('.other_name:first').text() + ' in the new game?', event.value);
+
+                        promise.done(function(confirmed, newGameId) {
+                            if (confirmed) {
+                                location.hash = newGameId;
+                            }
+                        });
                     }
                     break;
             }
@@ -767,9 +835,13 @@ var BattleshipsClass = function() {
     }
 
     function newGameClickCallback() {
-        if (gameEnded || confirm('Are you sure you want to quit the current game?')) {
-            location.hash = 'new';
-        }
+        var promise = gameEnded ? $.when(true) : showConfirm('Are you sure you want to quit the current game?');
+
+        promise.done(function(confirmed) {
+            if (confirmed) {
+                location.hash = 'new';
+            }
+        });
     }
 
     function shot($field) {
@@ -1197,13 +1269,7 @@ var BattleshipsClass = function() {
     function chatAppend(text, isMe, timestamp) {
         var nameClass = isMe ? 'player_name' : 'other_name',
             name = $('.' + nameClass).first().text(),
-            date = new Date(timestamp),
-            formattedDate = date.getFullYear()
-                + '-' + (date.getMonth() + 1 < 10 ? '0' : '') + (date.getMonth() + 1)
-                + '-' + (date.getDate() < 10 ? '0' : '') + date.getDate()
-                + ' ' + (date.getHours() < 10 ? '0' : '') + date.getHours()
-                + ':' + (date.getMinutes() < 10 ? '0' : '') + date.getMinutes()
-                + ':' + (date.getSeconds() < 10 ? '0' : '') + date.getSeconds(),
+            formattedDate = formatDate(new Date(timestamp)),
             $time = $('<span>').addClass('time').text('[' + formattedDate + '] '),
             $chatterName = $('<span>').addClass(nameClass).text(name),
             $name = $('<span>').addClass('name').append($chatterName).append(': '),
@@ -1256,12 +1322,24 @@ var BattleshipsClass = function() {
         return [parseInt(indexes[1]), parseInt(indexes[0])];
     }
 
+    /**
+     * @param {Date} date
+     * @return {string}
+     */
+    function formatDate(date) {
+        return date.getFullYear()
+            + '-' + (date.getMonth() + 1 < 10 ? '0' : '') + (date.getMonth() + 1)
+            + '-' + (date.getDate() < 10 ? '0' : '') + date.getDate()
+            + ' ' + (date.getHours() < 10 ? '0' : '') + date.getHours()
+            + ':' + (date.getMinutes() < 10 ? '0' : '') + date.getMinutes()
+            + ':' + (date.getSeconds() < 10 ? '0' : '') + date.getSeconds();
+    }
+
     var progress = (function () {
         var stages = [],
             timeout = 0,
             $progressBar = $('.progress-bar'),
-            $progressModal = $('#progress-modal').modal({keyboard: false, show: false}),
-            //$progressModal = $('#progress-modal').modal({keyboard: false, backdrop: 'static', show: false}),
+            $progressModal = $('#progress-modal').modal({backdrop: false, show: false}),
             error = function() {
                 clearTimeout(timeout);
                 $progressBar.addClass('progress-bar-danger').removeClass('active');
