@@ -1,6 +1,4 @@
 'use strict';
-// @todo fix name update, fix joined player name, fix double chat msg when I add, fix settting turn,
-//          gameStarted (not started yet)
 var BattleshipsClass = function() {
     // events log management
     var debug = !!localStorage.getItem('debug'),
