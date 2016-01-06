@@ -272,16 +272,7 @@ var BattleshipsClass = function() {
             otherStarted = hasStarted;
         }
 
-        setGameStarted(playerStarted && otherStarted);
-    }
-
-    /**
-     * @param {Boolean} hasStarted
-     */
-    function setGameStarted(hasStarted) {
-        gameStarted = hasStarted;
-
-        $('#random_shot').toggle(hasStarted);
+        gameStarted = playerStarted && otherStarted;
     }
 
     /**
@@ -293,7 +284,7 @@ var BattleshipsClass = function() {
         if ($currentModal) {
             $currentModal.data('hide', false).find('.modal-body').append(errorHtml);
         } else {
-            $('#modal').modal();
+            $('#modal').modal({backdrop: false});
             $currentModal.find('.modal-body').html(errorHtml);
             $currentModal.find('.modal-title').html('Error occurred');
         }
@@ -307,9 +298,10 @@ var BattleshipsClass = function() {
     function showConfirm(msg, data) {
         var promise = $.Deferred(),
             $modal = $('#modal'),
-            $modalFooter = $('<div class="modal-footer">');
+            $modalFooter = $('<div class="modal-footer">'),
+            $confirmMsg = $('<h4>'+ msg + '</h4>');
 
-        $modal.find('.modal-body').addClass('bg-primary').html('<h4>'+ msg + '</h4>');
+        $modal.find('.modal-body').addClass('bg-primary').html($confirmMsg);
         $modal.find('.modal-title').html('Confirm');
 
         $modalFooter.append('<button type="button" class="btn btn-danger">No</button>');
@@ -318,9 +310,13 @@ var BattleshipsClass = function() {
         $modal.find('.modal-content').append($modalFooter);
 
         $('button', $modal).on('click', function(event, hidden) {
-            promise.resolve($(this).data('confirmed') === true, data);
             $modalFooter.remove();
+            $confirmMsg.remove();
             $modal.find('.modal-body').removeClass('bg-primary');
+            $modal.find('.modal-title').html('');
+
+            // promise must resolse after removing title and before checking data 'hide'
+            promise.resolve($(this).data('confirmed') === true, data);
 
             if (($modal.data('hide') !== false) && (hidden !== true)) {
                 $modal.modal('hide');
@@ -350,31 +346,88 @@ var BattleshipsClass = function() {
     function showPrompt(msg) {
         var promise = $.Deferred(),
             $input = $('<input type="text" placeholder="'+ msg + '" class="form-control" />'),
-            existingModal = !!$currentModal;
+            existingModal = !!$currentModal,
+            $modal = existingModal ? $currentModal : $('#modal');
 
         if (existingModal) {
-            $currentModal.data('hide', false).find('.modal-body').append($input);
-        } else {
-            $('#modal').modal();
-            $currentModal.find('.modal-body').html($input);
-            $currentModal.find('.modal-title').html(msg);
-        }
-
-        $currentModal.on('shown.bs.modal', function(event) {
+            $modal.data('hide', false).find('.modal-body').addClass('bg-primary').append($input);
             $input.focus();
-        });
+            if ($modal.find('.modal-title').html() === '') {
+                $modal.find('.modal-title').html(msg);
+            }
+        } else {
+            $modal.on('shown.bs.modal', function() {
+                $input.focus();
+            }).modal({backdrop: false});
+            $modal.find('.modal-body').addClass('bg-primary').html($input);
+            $modal.find('.modal-title').html(msg);
+        }
 
         $input.on('keyup', function(event) {
             // hide on Enter
             if (event.which === 13) {
-                if (existingModal) {
-                    $input.remove();
-                } else {
-                    $currentModal.modal('hide');
-                }
+                $modal.find('.modal-body').removeClass('bg-primary');
 
                 promise.resolve($input.val());
+                $input.remove();
+
+                if (!existingModal || $modal.data('hide') === true) {
+                    $modal.modal('hide');
+                }
+                $modal.data('hide', true);
             }
+        });
+
+        return promise;
+    }
+
+    /**
+     * @param {String} msg
+     */
+    function showInfo(msg) {
+        var promise = $.Deferred(),
+            $infoMsg = $('<h4>'+ msg + '</h4>'),
+            $modalFooter = $('<div class="modal-footer">'),
+            existingModal = !!$currentModal,
+            $modal = existingModal ? $currentModal : $('#modal'),
+            $button = $('<button type="button" class="btn btn-primary">OK</button>');
+
+        $modal.find('.modal-content').append($modalFooter.append($button));
+
+        if (existingModal) {
+            $modal.data('hide', false).find('.modal-body').addClass('bg-primary').append($infoMsg);
+            $button.focus();
+            if ($modal.find('.modal-title').html() === '') {
+                $modal.find('.modal-title').html('Info');
+            }
+        } else {
+            $modal.find('.modal-body').addClass('bg-primary').html($infoMsg);
+            $modal.find('.modal-title').html('Info');
+            $modal.on('shown.bs.modal', function () {
+                $button.focus();
+            }).modal({backdrop: false});
+        }
+
+
+        $button.on('click', function() {
+            $modal.find('.modal-body').removeClass('bg-primary');
+            $modalFooter.remove();
+            $infoMsg.remove();
+
+            if (!existingModal) {
+                $modal.find('.modal-title').html('');
+            }
+
+            promise.resolve();
+
+            if (!existingModal || $modal.data('hide') === true) {
+                $modal.modal('hide');
+            }
+            $modal.data('hide', true);
+        });
+
+        $modal.on('hide.bs.modal', function() {
+            $button.triggerHandler('click', true);
         });
 
         return promise;
@@ -1008,10 +1061,10 @@ var BattleshipsClass = function() {
         }
 
         if ($battleground.board(0).filter('.hit').length >= 20) {
-            alert($('.other_name:first').text() + ' won');
+            showInfo($('.other_name:first').text() + ' won');
             gameEnded = true;
         } else if ($battleground.board(1).filter('.hit').length >= 20) {
-            alert($('.player_name:first').text() + ' won');
+            showInfo($('.player_name:first').text() + ' won');
             gameEnded = true;
         }
     }

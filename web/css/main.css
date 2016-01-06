@@ -102,11 +102,6 @@ div.board div div:not(.miss) i.fa-sun-o {
     display: none;
 }
 
-/* Random shot button only when game started */
-#random_shot {
-    display: none;
-}
-
 
 /* chatbox */
 #chatbox {
