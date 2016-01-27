@@ -527,8 +527,6 @@ var BattleshipsClass = function() {
             method: 'PATCH',
             data: {playerShips: playerShips}
         }).then(function() {
-            return addEvent('start_game');
-        }).then(function() {
             setPlayerStarted(true, true);
             $startButton.removeClass('active');
             setTurn(gameStarted && playerNumber === 1 ? 0 : 1);
