@@ -144,9 +144,9 @@ var BattleshipsClass = function() {
             $(this).blur();
         });
 
-        $('.modal').on('show.bs.modal', function(event) {
+        $('.modal').on('show.bs.modal', function() {
             $currentModal = $(this);
-        }).on('hide.bs.modal', function(event) {
+        }).on('hide.bs.modal', function() {
             $currentModal = null;
         });
 
@@ -313,7 +313,7 @@ var BattleshipsClass = function() {
             $modal.find('.modal-body').removeClass('bg-primary');
             $modal.find('.modal-title').html('');
 
-            // promise must resolse after removing title and before checking data 'hide'
+            // promise must resolve after removing title and before checking data 'hide'
             promise.resolve($(this).data('confirmed') === true, data);
 
             if (($modal.data('hide') !== false) && (hidden !== true)) {
@@ -381,6 +381,7 @@ var BattleshipsClass = function() {
 
     /**
      * @param {String} msg
+     * @return {Object} Promise
      */
     function showInfo(msg) {
         var promise = $.Deferred(),
@@ -571,7 +572,7 @@ var BattleshipsClass = function() {
 
     /**
      * @param {String} type
-     * @param {String} [value]
+     * @param {String|Number} [value]
      * @return {Object} jqXHR
      */
     function addEvent(type, value) {
@@ -613,7 +614,7 @@ var BattleshipsClass = function() {
             url: '/games/' + gameId,
             method: 'PATCH',
             data: {joinGame: true},
-            success: function(data) {
+            success: function() {
                 console.info('Joined game (%d)', gameId);
             }
         });
@@ -683,8 +684,7 @@ var BattleshipsClass = function() {
             lastShot,
             position,
             $field,
-            boardNumber,
-            promise;
+            boardNumber;
 
         for (i = 0; i < events.length; i++) {
             event = events[i];
@@ -733,16 +733,12 @@ var BattleshipsClass = function() {
 
                 case 'new_game':
                     if (event.player !== playerNumber) {
-                        checkGameEnd();
-                        promise = gameEnded
-                            ? $.when(true, event.value)
-                            : showConfirm('Do you want to join ' + $('.other_name:first').text() + ' in the new game?', event.value);
-
-                        promise.done(function(confirmed, newGameId) {
-                            if (confirmed) {
-                                location.hash = newGameId;
-                            }
-                        });
+                        showConfirm('Do you want to join ' + $('.other_name:first').text() + ' in the new game?', event.value)
+                            .done(function(confirmed, newGameId) {
+                                if (confirmed) {
+                                    location.hash = newGameId;
+                                }
+                            });
                     }
                     break;
             }
@@ -762,7 +758,7 @@ var BattleshipsClass = function() {
     }
 
     function chatboxKeyupCallback(event) {
-        var text, commandMatch;
+        var text, commandMatch, $update;
 
         if (event.which !== 13) {
             return true;
@@ -777,21 +773,22 @@ var BattleshipsClass = function() {
         // \debug or \nodebug
         commandMatch = text.match(/^\\(no)?debug$/);
         if (commandMatch) {
+            $update = $('#update');
             // \nodebug
             if (commandMatch[1]) {
                 localStorage.removeItem('debug');
                 debug = false;
                 if (!updateExecute) {
-                    $('#update').triggerHandler('click');
+                    $update.triggerHandler('click');
                 }
-                $('#update').hide();
             } else {
                 localStorage.setItem('debug', true);
                 debug = true;
-                $('#update').show();
             }
 
+            $update.toggle(debug);
             $chatbox.val('');
+
             return true;
         }
 
@@ -865,7 +862,7 @@ var BattleshipsClass = function() {
             url: '/users/' + JSON.parse(atob(apiKey.split('.')[1])).id,
             method: 'PATCH',
             data: {name: newName},
-            success: function(data) {
+            success: function() {
                 console.log({name: newName});
                 $('.player_name').text(newName);
                 $input.hide().siblings('span').show();
@@ -1324,7 +1321,7 @@ var BattleshipsClass = function() {
             $name = $('<span>').addClass('name').append($chatterName).append(': '),
             $text = $('<span>').text(text),
             $chatRow = $('<p>').append($time).append($name).append($text),
-            $chats = $('#chatbox div.chats'),
+            $chats = $('#chatbox').find('div.chats'),
             $times = $chats.find('.time'),
             timesLength = $times.length,
             timesIterator = timesLength - 1;
