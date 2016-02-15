@@ -157,6 +157,42 @@ var BattleshipsClass = function() {
         });
     };
 
+    var ws;
+    function setupWebsocket() {
+        ws = new ab.Session('ws://192.168.1.234:8080', onOpen, onClose, {'skipSubprotocolCheck': true});
+
+        function onOpen() {
+            ws.subscribe('games-' + gameId, function(topic, data) {
+                console.info('new event', topic, data);
+                handleEvents([data]);
+            });
+        }
+
+        function onClose() {
+            console.warn('WebSocket connection closed');
+        }
+    }
+
+    /**
+     * @param {String} type
+     * @param {String|Number} [value]
+     * @return {Object} Promise
+     */
+    function addEventWebsocket(type, value) {
+        var wsMsg = {
+            url: '/v1/games/' + gameId + '/events',
+            method: 'POST',
+            headers: {'CONTENT_TYPE': 'application/json', 'HTTP_ACCEPT': 'application/json', 'HTTP_AUTHORIZATION': 'Bearer ' + apiKey},
+            data: {type: type, value: value}
+        };
+
+        return ws.call('games-' + gameId, wsMsg).then(function(data) {
+            console.info('then POST', data);
+
+            return data['content'];
+        });
+    }
+
     /**
      * @return {Object} Promise
      */
@@ -206,7 +242,7 @@ var BattleshipsClass = function() {
             progress.modal({title: 'Creating new game', stages: [[20, 40], 100]});
             addGame().done(progress.updateStage, resumeFunction);
         } else if (hashInfo) {
-            setupGame().done(resumeFunction);
+            setupGame().done(resumeFunction, setupWebsocket);
         } else {
             progress.modal({title: 'Looking for available games', stages: [[20, 40], 100]});
             getAvailableGames()
@@ -576,6 +612,10 @@ var BattleshipsClass = function() {
      * @return {Object} jqXHR
      */
     function addEvent(type, value) {
+        if (type === 'chat' || type === 'shot' || type === 'new_game') {
+            return addEventWebsocket(type, value);
+        }
+
         return $.ajax({
             url: '/games/' + gameId + '/events',
             method: 'POST',
@@ -932,7 +972,7 @@ var BattleshipsClass = function() {
             if (shotResult === 'sunk') {
                 checkGameEnd();
             }
-        }).always(function() {
+
             shotInProgress = false;
             $field.removeClass('shot');
         });
