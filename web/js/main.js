@@ -152,19 +152,18 @@ var BattleshipsClass = function() {
 
         $(window).on('hashchange', onHashChange);
 
-        setupUser().done(function() {
-            $(window).triggerHandler('hashchange', {first: true});
-        });
+        setupWebsocket()
     };
 
     var ws;
     function setupWebsocket() {
+        ab.Deferred = jQuery.Deferred;
         ws = new ab.Session('ws://192.168.1.234:8080', onOpen, onClose, {'skipSubprotocolCheck': true});
 
         function onOpen() {
-            ws.subscribe('games-' + gameId, function(topic, data) {
-                console.info('new event', topic, data);
-                handleEvents([data]);
+            console.info('opened');
+            setupUser().done(function() {
+                $(window).triggerHandler('hashchange', {first: true});
             });
         }
 
@@ -179,19 +178,44 @@ var BattleshipsClass = function() {
      * @return {Object} Promise
      */
     function addEventWebsocket(type, value) {
-        var wsMsg = {
-            url: '/v1/games/' + gameId + '/events',
-            method: 'POST',
-            headers: {'CONTENT_TYPE': 'application/json', 'HTTP_ACCEPT': 'application/json', 'HTTP_AUTHORIZATION': 'Bearer ' + apiKey},
-            data: {type: type, value: value}
-        };
-
-        return ws.call('games-' + gameId, wsMsg).then(function(data) {
-            console.info('then POST', data);
-
+        return callWebsocket(
+            'games-' + gameId,
+            '/games/' + gameId + '/events',
+            'POST',
+            {type: type, value: value}
+        ).then(function(data) {
             return data['content'];
         });
     }
+
+    /**
+     * @param {String} subscription
+     * @param {String} url
+     * @param {String} method
+     * @param {Object} [data]
+     * @return {Object} Promise
+     */
+    function callWebsocket(subscription, url, method, data) {
+        var headers = {'HTTP_ACCEPT': 'application/json', 'HTTP_AUTHORIZATION': 'Bearer ' + apiKey};
+
+        if (data) {
+            headers.CONTENT_TYPE = 'application/json';
+        } else {
+            data = null;
+        }
+
+        var wsMsg = {
+            url: '/v1' + url,
+            method: method,
+            headers: headers,
+            data: data
+        };
+
+        return ws.call(subscription, wsMsg).done(function(data) {
+            console.info('data from WS', data);
+        });
+    }
+
 
     /**
      * @return {Object} Promise
@@ -242,7 +266,7 @@ var BattleshipsClass = function() {
             progress.modal({title: 'Creating new game', stages: [[20, 40], 100]});
             addGame().done(progress.updateStage, resumeFunction);
         } else if (hashInfo) {
-            setupGame().done(resumeFunction, setupWebsocket);
+            setupGame().done(resumeFunction);
         } else {
             progress.modal({title: 'Looking for available games', stages: [[20, 40], 100]});
             getAvailableGames()
@@ -258,6 +282,11 @@ var BattleshipsClass = function() {
             gameId = parseInt(hashInfo);
             console.info('Game from hash (id: %d)', gameId);
 
+            ws.subscribe('games-' + gameId, function(topic, data) {
+                console.info('new event', topic, data);
+                handleEvents([data]);
+            });
+
             progress.modal({title: 'Loading game details', stages: [[0, 10], [30, 40], [60, 80], 100]});
 
             return getGame()
@@ -266,9 +295,11 @@ var BattleshipsClass = function() {
                         $field,
                         $board = $battleground.board(0);
 
+                    data = data['content'];
+
                     playerNumber = data.playerNumber;
 
-                    if (data.playerShips.length > 0) {
+                    if (data.playerShips && data.playerShips.length > 0) {
                         for (key in data.playerShips) {
                             $field = getFieldByCoords(data.playerShips[key], $board);
                             $field.addClass('ship');
@@ -472,6 +503,57 @@ var BattleshipsClass = function() {
      * @return {Object} jqXHR
      */
     function getAvailableGames() {
+        return callWebsocket(
+            'games',
+            '/games?available=true',
+            'GET'
+        ).done(function(data) {
+            var $gameList, rowHtml, game, i;
+
+            data = data['content'];
+            if (data.length === 0) {
+                return;
+            }
+
+            $gameList = $('<table class="table table-striped">');
+            $gameList.append('<thead><tr><th>Player name</th><th>Game created</th><th>Action</th></tr></thead>');
+
+            rowHtml = '<tbody>';
+
+            rowHtml += '<tr class="info">';
+            rowHtml += '<td>' + $('.player_name:first').text() + '</td>';
+            rowHtml += '<td></td>';
+            rowHtml += '<td><a href="#new" class="btn btn-info btn-xs">Create New</a></td>';
+            rowHtml += '</tr>';
+
+            for (i = 0; i < data.length; i++) {
+                game = data[i];
+
+                rowHtml += '<tr>';
+                rowHtml += '<td>' + game.other.name + '</td>';
+                rowHtml += '<td>' + formatDate(new Date(game.timestamp)) + '</td>';
+                rowHtml += '<td><a href="#' + game.id + '" class="btn btn-success btn-xs">Join</a></td>';
+                rowHtml += '</tr>';
+            }
+
+            rowHtml += '</tbody>';
+            $gameList.append(rowHtml);
+
+            if ($currentModal) {
+                $currentModal.data('hide', false);
+            } else {
+                $('#modal').modal();
+                $currentModal.find('.modal-title').html('Join a game or create a new one');
+            }
+
+            $('a', $gameList).on('click', function() {
+                $gameList.remove();
+                $currentModal.data('hide', true);
+            });
+
+            $currentModal.find('.modal-body').append($gameList);
+        });
+
         return $.ajax({
             url: '/games?available=true',
             method: 'GET',
@@ -559,6 +641,20 @@ var BattleshipsClass = function() {
         }).toArray();
 
         // @todo move to a separate function
+        callWebsocket(
+            'games-' + gameId,
+            '/games/' + gameId,
+            'PATCH',
+            {playerShips: playerShips}
+        ).then(function() {
+            setPlayerStarted(true, true);
+            $startButton.removeClass('active');
+            setTurn(gameStarted && playerNumber === 1 ? 0 : 1);
+        }).fail(function() {
+            $randomShipsButton.prop('disabled', false);
+        });
+        return;
+
         $.ajax({
             url: '/games/' + gameId,
             method: 'PATCH',
@@ -578,6 +674,14 @@ var BattleshipsClass = function() {
     function getUser() {
         var userId = JSON.parse(atob(apiKey.split('.')[1])).id;
 
+        return callWebsocket(
+            'users=' + userId,
+            '/users/' + userId,
+            'GET'
+        ).done(function(data) {
+            $('.player_name').text(data['content'].name);
+        });
+
         return $.ajax({
             url: '/users/' + userId,
             method: 'GET',
@@ -592,6 +696,22 @@ var BattleshipsClass = function() {
      * @return {Object} jqXHR
      */
     function addUser(name) {
+        return callWebsocket(
+            'users',
+            '/users',
+            'POST',
+            {name: name}
+        ).then(function(data) {
+            console.info('addUser data', data);
+            var userId = parseInt(data.headers.location[0].match(/\d+$/)[0]);
+
+            apiKey = data.headers['api-key'][0];
+            localStorage.setItem('apiKey', apiKey);
+            console.info('User created (id, apiKey)', userId, apiKey);
+
+            return data;
+        });
+
         return $.ajax({
             url: '/users',
             method: 'POST',
@@ -612,9 +732,7 @@ var BattleshipsClass = function() {
      * @return {Object} jqXHR
      */
     function addEvent(type, value) {
-        if (type === 'chat' || type === 'shot' || type === 'new_game') {
-            return addEventWebsocket(type, value);
-        }
+        return addEventWebsocket(type, value);
 
         return $.ajax({
             url: '/games/' + gameId + '/events',
@@ -627,6 +745,23 @@ var BattleshipsClass = function() {
      * @return {Object} jqXHR
      */
     function addGame() {
+        return callWebsocket(
+            'games',
+            '/games',
+            'POST'
+        ).done(function(data) {
+            // @todo DRY
+            var newGameId = parseInt(data.headers.location[0].match(/\d+$/)[0]);
+
+            console.info('Game created (%d)', newGameId);
+            if (otherJoined || playerNumber === 2) {
+                addEvent('new_game', newGameId);
+                console.info('Other player invited to the new game', newGameId);
+            }
+
+            gameId = newGameId;
+            location.hash = gameId;
+        });
         return $.ajax({
             url: '/games',
             method: 'POST',
@@ -650,6 +785,12 @@ var BattleshipsClass = function() {
      * @return {Object} jqXHR
      */
     function joinGame() {
+        return callWebsocket(
+            'games-' + gameId,
+            '/games/' + gameId,
+            'PATCH',
+            {joinGame: true}
+        );
         return $.ajax({
             url: '/games/' + gameId,
             method: 'PATCH',
@@ -664,6 +805,11 @@ var BattleshipsClass = function() {
      * @return {Object} jqXHR
      */
     function getGame() {
+        return callWebsocket(
+            'games-' + gameId,
+            '/games/' + gameId,
+            'GET'
+        );
         return $.ajax({
             url: '/games/' + gameId,
             method: 'GET'
@@ -677,6 +823,14 @@ var BattleshipsClass = function() {
     function getEvents(data) {
         var filters = data ? '?' + $.param(data) : '';
 
+        return callWebsocket(
+            'games-' + gameId,
+            '/games/' + gameId + '/events',
+            'GET'
+        ).done(function(data) {
+            handleEvents(data['content']);
+            checkGameEnd();
+        });
         return $.ajax({
             url: '/games/' + gameId + '/events' + filters,
             method: 'GET',
@@ -747,6 +901,7 @@ var BattleshipsClass = function() {
                     if (event.player !== playerNumber) {
                         $('.board_menu:eq(1) span').css({fontWeight: 'bold'});
                         getGame().done(function(data) {
+                            data = data['content'];
                             if (data.other) {
                                 $('.other_name').text(data.other.name);
                                 otherJoined = true;
@@ -898,6 +1053,20 @@ var BattleshipsClass = function() {
 
         newName = $input.val();
         // @todo find a better way for storing/getting userId
+
+        callWebsocket(
+            'users-' + JSON.parse(atob(apiKey.split('.')[1])).id,
+            '/users/' + JSON.parse(atob(apiKey.split('.')[1])).id,
+            'PATCH',
+            {name: newName}
+        ).then(function() {
+            console.log({name: newName});
+            $('.player_name').text(newName);
+            $input.hide().siblings('span').show();
+            addEvent('name_update', newName);
+        });
+        return;
+
         $.ajax({
             url: '/users/' + JSON.parse(atob(apiKey.split('.')[1])).id,
             method: 'PATCH',
