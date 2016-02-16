@@ -272,6 +272,7 @@ var BattleshipsClass = function() {
             getAvailableGames()
                 .done(progress.updateStage)
                 .done(function(data) {
+                    data = data['content'];
                     if (data.length === 0) {
                         location.hash = 'new';
                     }
