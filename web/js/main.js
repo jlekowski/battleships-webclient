@@ -42,15 +42,8 @@ var BattleshipsClass = function() {
     // game Id
         gameId,
     // id of the last event retrieved from API
-        lastIdEvents = 0,
-    // updates AJAX object
-        updateXHR = null,
-    // true - updates are requested (updating ON), false - you can start requesting updates (updating OFF),
-        updateExecute = false,
-    // interval between update calls
-        updateInterval = 3000,
-    // setTimeout() return value when waiting update_interval for a new update call
-        lastTimeout = null;
+        lastIdEvents = 0
+    ;
 
     this.run = function() {
         // default settings for AJAX calls
@@ -120,9 +113,6 @@ var BattleshipsClass = function() {
             .on('click', nameUpdateClickCallback)
             .siblings(':text')
             .on({keyup: nameUpdateTextKeyupCallback, blur: nameUpdateTextBlurCallback});
-
-        // updates management
-        $('#update').on('click', updateClickCallback);
 
         // what to display depends on debug mode status
         $('.debug').toggle(debug);
@@ -236,8 +226,7 @@ var BattleshipsClass = function() {
     }
 
     function onHashChange(event, data) {
-        var hashInfo = location.hash.replace(/^#/, ''),
-            resumeFunction = $.noop();
+        var hashInfo = location.hash.replace(/^#/, '');
 
         // no need to do it after page load
         if (!data || !data.first) {
@@ -249,24 +238,11 @@ var BattleshipsClass = function() {
             $('.board_menu:eq(1) span').css({fontWeight: ''});
         }
 
-        // stop looking for updates when changing game - may try to get updates for a game before joining it
-        if (updateExecute || !debug) {
-            // (re)start AJAX calls for updates
-            resumeFunction = function() {
-                $('#update').triggerHandler('click');
-            };
-
-            // stop AJAX calls for updates
-            if (updateExecute) {
-                resumeFunction();
-            }
-        }
-
         if (hashInfo === 'new') {
             progress.modal({title: 'Creating new game', stages: [[20, 40], 100]});
-            addGame().done(progress.updateStage, resumeFunction);
+            addGame().done(progress.updateStage);
         } else if (hashInfo) {
-            setupGame().done(resumeFunction);
+            setupGame();
         } else {
             progress.modal({title: 'Looking for available games', stages: [[20, 40], 100]});
             getAvailableGames()
@@ -842,36 +818,6 @@ var BattleshipsClass = function() {
         });
     }
 
-    function updateClickCallback() {
-        updateExecute = !updateExecute;
-
-        if (updateExecute) {
-            runUpdates();
-        } else {
-            stopUpdates();
-        }
-
-        $(this).toggleClass('active', updateExecute);
-    }
-
-    function runUpdates() {
-        if (updateExecute !== true) {
-            return;
-        }
-
-        updateXHR = getEvents({gt: lastIdEvents, player: (playerNumber === 1 ? 2 : 1)}).done(function() {
-            if (updateExecute !== false) {
-                lastTimeout = setTimeout(runUpdates, updateInterval);
-            }
-        });
-    }
-
-    function stopUpdates() {
-        updateExecute = false;
-        updateXHR.abort();
-        clearTimeout(lastTimeout);
-    }
-
     function handleEvents(events) {
         var i,
             event,
@@ -954,7 +900,7 @@ var BattleshipsClass = function() {
     }
 
     function chatboxKeyupCallback(event) {
-        var text, commandMatch, $update;
+        var text, commandMatch;
 
         if (event.which !== 13) {
             return true;
@@ -969,20 +915,15 @@ var BattleshipsClass = function() {
         // \debug or \nodebug
         commandMatch = text.match(/^\\(no)?debug$/);
         if (commandMatch) {
-            $update = $('#update');
             // \nodebug
             if (commandMatch[1]) {
                 localStorage.removeItem('debug');
                 debug = false;
-                if (!updateExecute) {
-                    $update.triggerHandler('click');
-                }
             } else {
                 localStorage.setItem('debug', true);
                 debug = true;
             }
 
-            $update.toggle(debug);
             $chatbox.val('');
 
             return true;
