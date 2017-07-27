@@ -20,4 +20,4 @@ http://dev.lekowski.pl
 ## === Changelog ===
 
 * version **1.0**
- * Working version of the Web Client deployed
+  * Working version of the Web Client deployed
